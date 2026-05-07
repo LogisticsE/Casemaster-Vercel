@@ -121,7 +121,8 @@ async function renderList(info: BOInfo, params: Record<string, string>): Promise
     ? info.listGroup
     : [...info.attributes.keys()];
 
-  const cols = ['id', ...columns.filter(c => c !== 'id')]
+  const pkAttr = info.primaryKey;
+  const cols = [pkAttr, ...columns.filter(c => c !== pkAttr)]
     .map(c => info.attributes.get(c)?.column ?? c);
 
   const orderBy = info.primaryKey;
