@@ -3,6 +3,11 @@
   "version": 2,
   "buildCommand": "",
   "outputDirectory": ".",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "app/**"
+    }
+  },
   "rewrites": [
     { "source": "/page/:path*",        "destination": "/api?_p=/page/:path*" },
     { "source": "/maintenance/:path*", "destination": "/api?_p=/maintenance/:path*" }

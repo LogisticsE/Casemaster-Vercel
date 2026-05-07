@@ -13,11 +13,28 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { loadApp } from '../src/cms/loader.js';
 import { callFunction, Ctx } from '../src/cms/eval.js';
 
-const APP_DIR = process.env.CMS_APP_DIR || join(process.cwd(), 'app');
+// process.cwd() is unreliable on Vercel (varies between dev / prod / region).
+// Walk from the bundle's own location upward until we find an `app/` directory
+// alongside it. Required because Vercel's includeFiles copies `app/**` to the
+// deploy root, but the function file lives inside `api/`.
+function findAppDir(): string {
+  if (process.env.CMS_APP_DIR) return process.env.CMS_APP_DIR;
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, '..', 'app'),
+    resolve(here, '..', '..', 'app'),
+    resolve(process.cwd(), 'app'),
+  ];
+  for (const c of candidates) if (existsSync(c)) return c;
+  return candidates[0]!;
+}
+const APP_DIR = findAppDir();
 
 // Module-scoped registry — parsed once per Vercel function instance and
 // reused for every warm invocation. Phase 11 makes this smarter.
