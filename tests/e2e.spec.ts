@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { loadApp } from '../src/cms/loader.js';
-import { callFunction, Ctx } from '../src/cms/eval.js';
+import { loadApp } from 'cms-vercel';
+import { callFunction, Ctx } from 'cms-vercel';
 
 // Live-DB e2e is gated on DATABASE_URL being present (set via .env.local
 // for local runs, or the CI's secret store). Without it we skip rather

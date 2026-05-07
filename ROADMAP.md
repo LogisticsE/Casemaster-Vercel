@@ -1,13 +1,27 @@
 # Roadmap — CaseMaster on Vercel
 
-The single source of truth for this experiment. Update statuses here as
-work progresses; no other doc tracks completion.
+The single source of truth for this work. Update statuses here as work
+progresses; no other doc tracks completion.
 
 ## Vision
 
-Take any CaseMaster `.cms` application, push it to GitHub or Bitbucket,
-and have Vercel build and serve it as serverless functions — no
-long-running .NET host, no Windows-only binaries, no `CaseMaster.Web.exe`.
+A **standard, packaged way** to take any CaseMaster `.cms` application,
+push it to GitHub or Bitbucket, and have Vercel build and serve it as
+serverless functions — no long-running .NET host, no Windows-only
+binaries, no `CaseMaster.Web.exe`. The artefact is an npm package
+(`cms-vercel`) plus a scaffold (`npm create cms-vercel`), not a
+one-off integration.
+
+## Two tracks
+
+The roadmap has two phases of work. **Track 1 (Phases 1–12)** built the
+proof of concept: a working slice that proved the architecture is
+feasible — a real `.cms` page renders on Vercel against the same Neon
+DB. **Track 2 (Phases 13–22)** is the productisation track: turn the
+PoC into a reusable package with adoption tooling so any CaseMaster
+project can use it.
+
+Track 1 is closed. Track 2 is the active work.
 
 ## Status legend
 
@@ -198,6 +212,134 @@ How a CaseMaster owner brings their app over.
       never-going-to features
 - [-] Playwright parity suite — deferred until enough pages are ported
       that visual diffs are meaningful
+
+---
+
+# Track 2 — Productisation
+
+Turning the PoC into a reusable package + scaffold so any CaseMaster
+project can deploy to Vercel without forking this repo.
+
+## Phase 13 — Package extraction
+
+Make the runtime importable as `cms-vercel` from any project.
+
+- [ ] npm workspace at the repo root (`packages/*` + the example app)
+- [ ] `packages/runtime/` ships the lexer / parser / interpreter /
+      renderer / BO registry / Postgres pool
+- [ ] Public API: `createHandler({ appDir })` returns a Vercel-compatible
+      function. Plus typed exports for advanced consumers (`Ctx`,
+      `Value`, `loadApp`, `callFunction`)
+- [ ] `packages/runtime/dist/` published to npm (private scope or public —
+      decide before the 0.1.0 cut)
+- [ ] The existing live deploy keeps working post-refactor (no URL
+      regressions; Vercel project root re-pointed if needed)
+- [ ] `tools/bench.mjs` and `tools/import.mjs` move into the package's
+      `bin/` so they're available as `npx cms-vercel <cmd>` once published
+
+## Phase 14 — Scaffold tool
+
+`npm create cms-vercel my-app` is how a new user starts.
+
+- [ ] `packages/create-cms-vercel/` — the scaffold runner
+- [ ] Lays out `package.json`, `vercel.json`, `api/index.ts` (5 lines),
+      `app/` placeholder, `.env.example`, `README.md`
+- [ ] First-run prompts: project name, package manager, optional
+      "import from CaseMaster runtime path"
+- [ ] If imported, runs `cms-vercel import` to populate `app/`
+- [ ] Documented in the package README
+
+## Phase 15 — Build-time validator
+
+Tell the user what *won't* work *before* they deploy.
+
+- [ ] `cms-vercel build` walks every `.cms` and parses
+- [ ] Reports unknown calls (`unimplemented call: x.y`), unrendered
+      `<@page/...>` qualifiers, missing BO references, and other
+      surface-level gaps with `file:line:col`
+- [ ] Exits non-zero on errors; warnings still allow build
+- [ ] CI integration: GitHub Actions workflow template runs it
+
+## Phase 16 — Close the writer gap
+
+Read-only is fine for demos; real apps mutate.
+
+- [ ] `bo.persist`, `bo.create`, `bo.delete`, `bo.setAttr`
+- [ ] `sql.execute` (raw SQL, no rows returned)
+- [ ] `sql.fetch` returns rows for cases the BO layer can't model
+- [ ] Transactions: implicit per-request? Explicit `sql.transaction`?
+      Decide and document.
+
+## Phase 17 — Outbound HTTP
+
+The Axylog ingester is the canonical example: it pulls JSON from
+api.axylog.com and upserts into Postgres.
+
+- [ ] `httpRequest.create(url, opts)` returns a request handle
+- [ ] `httpRequest.responseBody(req)` returns the body string
+- [ ] Headers, methods, JSON bodies, basic auth + bearer
+- [ ] Document Vercel's 10s/60s/900s function-duration limits per plan
+
+## Phase 18 — Real auth + sessions
+
+Replaces the Phase 7 stub.
+
+- [ ] Postgres-backed session table (`cms_session`: id, payload, expires)
+- [ ] Cookie set/read; rolling expiry
+- [ ] Login page + login handler (configurable user table)
+- [ ] CSRF token (`__h=…` query param) for in-app form submits;
+      `qs.isTrusted()` returns true when the token matches
+- [ ] `qualifier.call('session/cookie:authenticate')` does real cookie
+      validation
+- [ ] Whitelist mechanism (`[//route.trusted]`) for explicit bypasses
+
+## Phase 19 — More page qualifiers
+
+Real pages need more than `container/content/title/html`.
+
+- [ ] `<@page/data/table>` — list with pagination, sorting, row links
+- [ ] `<@page/form>` + `<@page/form/control>` + input controls
+      (`text`, `select`, `checkbox`, `date`, `number`, `dropDown` if
+      feasible without select2)
+- [ ] `<@page/sidebar>` + `<@page/sidebar/link>` for the navbar/sidebar
+- [ ] `<@page/icon>` (font-awesome integration via the static-asset
+      tree)
+
+## Phase 20 — Auto BO maintenance
+
+`/maintenance/<bo>` becomes the standard CRUD surface.
+
+- [ ] List page: derived from `attributeGroups.list`
+- [ ] Detail / edit page: derived from `attributeGroups` (or all attrs)
+- [ ] Create + delete handlers
+- [ ] Pagination / sort / search
+- [ ] Honours `auditable`, `deleteRule`, `optional`, `caseSensitive`
+      flags from the BO declaration
+
+## Phase 21 — Parity CI
+
+Catch regressions automatically when the official runtime is the
+ground truth.
+
+- [ ] GitHub Actions matrix: `cms-vercel` on Linux + `CaseMaster.Web.exe`
+      on Windows
+- [ ] Curated URL list: `/page/foo/f/ping`, `/page/axylog/f/customers`,
+      `/maintenance/qr/labelTemplate`, …
+- [ ] Diff body bytes modulo expected variance (timestamps, CSRF tokens,
+      session cookies)
+- [ ] Block PRs that introduce divergence
+
+## Phase 22 — Docs + 0.1.0 release
+
+Make it adoptable.
+
+- [ ] API reference for every builtin in `packages/runtime/docs/api.md`
+- [ ] Migration guide: "porting a real CaseMaster app to Vercel" with
+      Axylog as the worked example
+- [ ] Examples gallery: `examples/{ping, hello, blog, qr-labels, …}`
+- [ ] CHANGELOG and SemVer policy
+- [ ] `npm publish` 0.1.0 (decide: public or scoped private)
+- [ ] Announce: README badge, GitHub Discussions enabled
 
 ---
 

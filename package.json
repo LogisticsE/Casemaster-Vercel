@@ -1,20 +1,24 @@
 {
-  "name": "cms-vercel",
+  "name": "cms-vercel-monorepo",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Run CaseMaster .cms applications on Vercel",
+  "description": "Monorepo root — npm workspace hosting cms-vercel + the example deploy",
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vercel dev",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "deploy": "vercel --prod",
+    "dev":            "vercel dev",
+    "typecheck":      "tsc --noEmit",
+    "test":           "vitest run",
+    "deploy":         "vercel --prod",
     "deploy:preview": "vercel"
   },
   "dependencies": {
+    "cms-vercel": "*",
     "pg": "^8.13.0"
   },
   "devDependencies": {

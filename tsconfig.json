@@ -12,5 +12,5 @@
     "lib": ["ES2022"],
     "types": ["node"]
   },
-  "include": ["api/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
+  "include": ["api/**/*.ts", "packages/**/*.ts", "tests/**/*.ts"]
 }

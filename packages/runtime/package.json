@@ -1,0 +1,38 @@
+{
+  "name": "cms-vercel",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Run CaseMaster .cms applications on Vercel",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "bin": {
+    "cms-vercel-bench":  "./bin/bench.mjs",
+    "cms-vercel-import": "./bin/import.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "README.md"
+  ],
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "peerDependencies": {
+    "@vercel/node": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.0",
+    "@vercel/node": "^3.2.0",
+    "typescript": "^5.4.0"
+  }
+}

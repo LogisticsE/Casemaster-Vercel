@@ -2,9 +2,10 @@
 
 ## In one sentence
 
-A drop-in serverless runtime for CaseMaster `.cms` applications so the
-same app that runs locally on `CaseMaster.Web.exe` can also be pushed to
-GitHub or Bitbucket and deployed to Vercel.
+An npm package (`cms-vercel`) plus a `npm create cms-vercel` scaffold
+that lets any CaseMaster `.cms` application deploy to Vercel as
+serverless functions — no long-running .NET host, no Windows-only
+binaries, no `CaseMaster.Web.exe`.
 
 ## In one minute
 
@@ -13,8 +14,21 @@ script files at request time. That binary needs a long-running Windows
 host, which excludes Vercel and most modern serverless platforms. This
 project re-implements *only* the surface area an app actually depends on
 — page routing, BO definitions, iterators, expressions, the standard
-library — in TypeScript, packaged as a Vercel Function. Same `.cms`
-files, same Postgres, same URLs.
+library — in TypeScript, shipped as a reusable npm package. Same
+`.cms` files, same Postgres, same URLs.
+
+## How a user adopts it
+
+```bash
+npm create cms-vercel my-app
+cd my-app
+npx cms-vercel import --from /path/to/casemaster-runtime  # optional
+git push origin main          # Vercel auto-deploys
+```
+
+That's the contract. The user owns `app/**.cms`, `vercel.json`, and
+their `.env`; the runtime lives in `node_modules/cms-vercel` and is
+upgraded with `npm update`.
 
 ## Architecture
 
@@ -40,18 +54,24 @@ we use a feature `cms-vercel` doesn't yet support).
 
 ## What's in scope
 
+- **Distribution**: an npm package (`cms-vercel`), a scaffold
+  (`create-cms-vercel`), and a CLI (`npx cms-vercel <cmd>`) for build,
+  validate, import, and bench.
 - **Routing**: URLs of the form `/page/<script>/f/<function>` and
   `/maintenance/<bo>` resolve to the matching `.cms` function.
 - **Pages**: `<@page/...>` resources render to HTML; `resolveTemplate`
   expands `{{ … }}` expressions.
 - **Business Objects**: `<@bo …>` declarations map to Postgres tables;
   `iterator.ofEntity` runs `SELECT`s; `bo.attr` reads columns;
-  `bo.persist` / SQL writes go through a connection pool.
+  `bo.persist` / `sql.execute` writes go through a connection pool.
 - **Standard library**: the functions used pervasively in real `.cms`
   code (`concat`, `if`, `eq`, `format`, `today`, `addDay`, `replace`,
   `json.parse`, `pb.get`, …).
-- **Build & deploy**: `cmsv build` precompiles, `cmsv deploy` ships;
-  CI templates for GitHub Actions and Bitbucket Pipelines are included.
+- **Auth**: real cookie sessions backed by Postgres, login page,
+  CSRF tokens.
+- **Build & deploy**: `npx cms-vercel build` validates source,
+  `vercel deploy` (or git push) ships; CI templates for GitHub
+  Actions and Bitbucket Pipelines are included in the scaffold.
 
 ## What's out of scope (today)
 
@@ -89,11 +109,14 @@ we use a feature `cms-vercel` doesn't yet support).
 
 ## Success criteria
 
-- An end-to-end demo: clone a fresh repo containing a small `.cms` app,
-  `cmsv deploy`, the Vercel URL renders the same pages as
-  `CaseMaster.Web.exe` does on the developer's laptop.
-- The Axylog Integration app — at least its read-only paths (lists,
-  detail views, exports) — runs on Vercel without source changes after
-  Phase 5.
-- A new CaseMaster developer can stand up a Vercel deployment in under
-  an hour, working only from `WHAT.md`, `HOW.md`, and the README.
+- **0.1.0 release**: `npm install cms-vercel` works from a fresh
+  Vercel project; `npm create cms-vercel my-app` scaffolds a working
+  template; `vercel deploy` produces a live URL.
+- **Migration path**: a real CaseMaster app's read-only pages (list,
+  detail, search) run on Vercel without source changes after Phase 19.
+  The Axylog Integration app is the canonical test case.
+- **Time-to-Hello-World**: a new developer who's never seen CaseMaster
+  goes from `npm create` to a public Vercel URL in under 15 minutes,
+  working only from the package README and the in-package CLI help.
+- **Build-time visibility**: `npx cms-vercel build` reports every
+  unsupported feature in their app before they deploy, with file:line:col.

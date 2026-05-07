@@ -18,43 +18,61 @@ status. Update only when an architectural choice changes.
 
 ## Module layout
 
+This repo is an **npm workspace** with two halves: a publishable
+**runtime package** and an **example app** that depends on it. The
+example also serves as the live deploy on Vercel and as the canonical
+parity-test fixture.
+
 ```
-cms-vercel/
-├── ROADMAP.md            (single source of truth for status)
-├── WHAT.md               (this project, in plain prose)
-├── HOW.md                (this file)
-├── README.md             (developer onboarding)
-├── package.json
-├── tsconfig.json
-├── vercel.json           (route config + cron entries)
-├── api/
-│   └── [...route].ts     (Vercel catch-all; resolves URL → .cms function)
-├── src/
-│   ├── cms/
-│   │   ├── lex.ts        (tokenizer)
-│   │   ├── parse.ts      (Pratt parser → AST)
-│   │   ├── ast.ts        (AST types)
-│   │   ├── eval.ts       (tree-walking interpreter)
-│   │   ├── builtins.ts   (concat, if, today, json.parse, …)
-│   │   ├── bo.ts         (BO registry + iterator → SQL)
-│   │   ├── db.ts         (Postgres pool)
-│   │   └── render.ts     (page resource → HTML)
-│   ├── cli/
-│   │   ├── dev.ts        (cmsv dev: local server + watch)
-│   │   ├── build.ts      (cmsv build: pre-parse, emit module map)
-│   │   └── deploy.ts     (cmsv deploy: passthrough to vercel)
-│   └── tools/
-│       └── import.ts     (cmsv import: copy a CaseMaster runtime layout)
-├── app/                  (the .cms app — never auto-modified)
-│   ├── bo/**/*.cms
-│   ├── page/**/*.cms
-│   └── script/**/*.cms
-└── tests/
-    ├── parser.spec.ts
-    ├── interp.spec.ts
-    └── parity/
-        └── ping.spec.ts  (live-runtime parity per URL)
+cms-vercel/                              (monorepo root, npm workspace)
+├── ROADMAP.md                           (single source of truth for status)
+├── WHAT.md / HOW.md / UNSUPPORTED.md
+├── package.json                         (workspaces: ["packages/*"])
+├── packages/
+│   ├── runtime/                         (the publishable npm package)
+│   │   ├── package.json                 (name: cms-vercel, exports, bin)
+│   │   ├── src/
+│   │   │   ├── lex.ts                   (tokenizer)
+│   │   │   ├── parse.ts                 (Pratt parser → AST)
+│   │   │   ├── ast.ts                   (AST types)
+│   │   │   ├── eval.ts                  (tree-walking interpreter)
+│   │   │   ├── bo.ts                    (BO registry + iterator → SQL)
+│   │   │   ├── db.ts                    (Postgres pool)
+│   │   │   ├── render.ts                (page resource → HTML)
+│   │   │   ├── handler.ts               (createHandler() — public API)
+│   │   │   └── index.ts                 (re-exports for consumers)
+│   │   ├── bin/
+│   │   │   ├── cms-vercel.ts            (CLI entry: build / import / bench)
+│   │   │   ├── build.ts                 (Phase 15 validator)
+│   │   │   ├── import.ts                (Phase 12/14 source importer)
+│   │   │   └── bench.ts                 (Phase 11 latency bench)
+│   │   └── dist/                        (built output for npm publish)
+│   └── create-cms-vercel/               (Phase 14 scaffold runner)
+│       └── ...
+├── api/index.ts                         (5 lines — uses createHandler)
+├── app/                                 (this example's .cms files)
+├── public/                              (this example's static assets)
+├── vercel.json
+└── tests/                               (parser + e2e + parity)
 ```
+
+The package's public API:
+
+```ts
+// packages/runtime/src/handler.ts
+import { createHandler } from 'cms-vercel';
+
+export default createHandler({
+  appDir: process.env.CMS_APP_DIR ?? './app',
+  // optional knobs:
+  //   onError(err, ctx)      → custom 500 page
+  //   bufferingMode          → 'streaming' | 'buffered'  (default 'buffered')
+  //   loaderHook(reg)        → mutate registry post-load (Phase 19+ qualifiers)
+});
+```
+
+That ~5 lines lives in any consumer's `api/index.ts`. Everything else
+they own is content (.cms, vercel.json).
 
 ## Parser strategy
 

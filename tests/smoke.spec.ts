@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { lex } from '../src/cms/lex.js';
-import { parse } from '../src/cms/parse.js';
-import { loadApp } from '../src/cms/loader.js';
-import { callFunction, Ctx } from '../src/cms/eval.js';
+import { lex } from 'cms-vercel';
+import { parse } from 'cms-vercel';
+import { loadApp } from 'cms-vercel';
+import { callFunction, Ctx } from 'cms-vercel';
 
 describe('lexer', () => {
   it('tokenises a simple set call', () => {
@@ -88,8 +88,8 @@ describe('Phase 4 — function calls', () => {
     end-function`;
     const reg = loadApp(join(process.cwd(), 'app'));
     // Re-parse our snippet on top of the existing registry
-    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
-    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
     for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
 
     const ctx: Ctx = {
@@ -109,8 +109,8 @@ describe('Phase 5 — standard library', () => {
         return format([t], 'yyyy/MM/dd')
     end-function`;
     const reg = loadApp(join(process.cwd(), 'app'));
-    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
-    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
     for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
 
     const ctx: Ctx = {
@@ -134,8 +134,8 @@ describe('Phase 6 — request introspection', () => {
         )
     end-function`;
     const reg = loadApp(join(process.cwd(), 'app'));
-    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
-    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
     for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
 
     const ctx: Ctx = {
@@ -153,8 +153,8 @@ describe('Phase 7 — auth stub', () => {
         return qualifier.call('session/cookie:authenticate')
     end-function`;
     const reg = loadApp(join(process.cwd(), 'app'));
-    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
-    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
     for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
 
     const ctx: Ctx = {
