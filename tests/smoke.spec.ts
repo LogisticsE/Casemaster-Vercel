@@ -147,10 +147,29 @@ describe('Phase 6 — request introspection', () => {
   });
 });
 
-describe('Phase 7 — auth stub', () => {
-  it('qualifier.call(session/cookie:authenticate) returns true', async () => {
+describe('Phase 18 — real auth', () => {
+  it('qualifier.call(session/cookie:authenticate) returns false when no cookie present', async () => {
     const src = `function entry()
         return qualifier.call('session/cookie:authenticate')
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'', headers: {} },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    // No cmsv_sid cookie → not authenticated.
+    expect(await callFunction(ctx, 'entry')).toBe(false);
+  });
+
+  it('session.set marks the session dirty', async () => {
+    const src = `function entry()
+        session.set('user', 'alice')
+        return session.get('user')
     end-function`;
     const reg = loadApp(join(process.cwd(), 'app'));
     const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
@@ -162,7 +181,59 @@ describe('Phase 7 — auth stub', () => {
       req: { method:'GET', url:'/x', query:{}, body:'' },
       res: { contentType:'text/plain', body:'', status:200, headers:{} },
     };
-    expect(await callFunction(ctx, 'entry')).toBe(true);
+    expect(await callFunction(ctx, 'entry')).toBe('alice');
+    expect(ctx.sessionDirty).toBe(true);
+  });
+});
+
+describe('Phase 19 — page qualifiers', () => {
+  it('renders @page/form + @page/form/control + @page/input/text', async () => {
+    const src = `function entry()
+        page.render(<@page/form
+            method: 'POST',
+            action: '/page/foo/f/save',
+            content: <@page/form/control
+                label: 'Your name',
+                input: <@page/input/text name: 'name', value: ''>
+            >
+        >)
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    await callFunction(ctx, 'entry');
+    expect(ctx.res.body).toContain('<form method="POST"');
+    expect(ctx.res.body).toContain('action="/page/foo/f/save"');
+    expect(ctx.res.body).toContain('<input type="text" name="name"');
+    expect(ctx.res.body).toContain('Your name');
+  });
+
+  it('renders @page/sidebar/link with active state', async () => {
+    const src = `function entry()
+        page.render(<@page/sidebar/link
+            label: 'Home', url: '/', active: true
+        >)
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('cms-vercel')).lex(src, 'inline.cms');
+    const parsed = (await import('cms-vercel')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    await callFunction(ctx, 'entry');
+    expect(ctx.res.body).toContain('class="cms-sidebar-link active"');
+    expect(ctx.res.body).toContain('href="/"');
   });
 });
 

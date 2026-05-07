@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "dev":            "vercel dev",
+    "build":          "npm --workspaces --if-present run build",
     "typecheck":      "tsc --noEmit",
     "test":           "vitest run",
     "deploy":         "vercel --prod",

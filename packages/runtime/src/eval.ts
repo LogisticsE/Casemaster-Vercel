@@ -73,6 +73,10 @@ export interface Ctx {
   // Request inputs.
   req: { method: string; url: string; query: Record<string,string>; body: string;
          headers?: Record<string, string|undefined> };
+  // Phase 18: session payload, hydrated by qualifier.call('session/...:authenticate').
+  // sessionDirty tells the route handler to write a Set-Cookie + UPSERT cms_session.
+  session?: { id: string; payload: Record<string, unknown> };
+  sessionDirty?: boolean;
 }
 
 export class RuntimeError extends Error {
@@ -367,6 +371,17 @@ async function dispatch(
       if (!fn) throw new RuntimeError(loc, `page.call: function not found: ${ref}`);
       return await callFunction(ctx, fnName, args.slice(1));
     }
+    case 'script.get': {
+      // script.get('./main') — used by BO files to look up the resource
+      // named `main`. Returns the resource's evaluated body.
+      const ref = String(args[0] ?? '');
+      const name = ref.startsWith('./') ? ref.slice(2) : ref;
+      const r = ctx.resources.get(name);
+      if (!r) return null;
+      return await evalExpr(ctx, scope, r.body);
+    }
+    case 'true':  return true;
+    case 'false': return false;
 
     // ─── Phase 5: standard library ──────────────────────────────────
     case 'today':       return new Date().toISOString().slice(0, 10);
@@ -479,18 +494,140 @@ async function dispatch(
     case 'qs.getUntrusted':       return ctx.req.query[String(args[0] ?? '')] ?? '';
     case 'qs.isTrusted':          return false; // CSRF: deferred to Phase 7+
 
-    // ─── Phase 7: auth (stub) ───────────────────────────────────────
+    // ─── Phase 16: writer-side BO + raw SQL ─────────────────────────
+    case 'sql.execute': {
+      // sql.execute('INSERT … VALUES (…)') — write-only SQL. The .cms app
+      // is responsible for escaping; we don't do interpolation here.
+      await query(String(args[0] ?? ''));
+      return null;
+    }
+    case 'sql.fetch': {
+      // sql.fetch('SELECT id, name FROM x') — returns an Iter walkable
+      // by `iterate`. Rows are plain objects, identical shape to bo.attr.
+      const rows = await query(String(args[0] ?? ''));
+      const out: Iter = {
+        __kind: 'Iter', iterName: 'r',
+        rows: rows.map(r => ({ __kind: 'Row', data: r as any })),
+      };
+      return out;
+    }
+    case 'bo.create': {
+      // Returns an empty Row that the caller mutates with bo.setAttr /
+      // bo.persist. INSERT happens at persist time, not here.
+      const entityName = String(args[0] ?? '');
+      return { __kind: 'Row', data: { __new: true } as any, entity: entityName } as Row;
+    }
+    case 'bo.setAttr': {
+      const row = args[0] as Row | undefined;
+      if (!isRow(row)) throw new RuntimeError(loc, 'bo.setAttr: first arg must be a row');
+      row.data[String(args[1] ?? '')] = args[2] ?? null;
+      return row;
+    }
+    case 'bo.persist': {
+      const row = args[0] as Row | undefined;
+      if (!isRow(row)) throw new RuntimeError(loc, 'bo.persist: first arg must be a row');
+      const info = row.entity ? ctx.bos.get(row.entity) : undefined;
+      const tbl  = info?.table ?? entityToTable(ctx, row.entity ?? '');
+      const pk   = info?.primaryKey ?? 'id';
+      const isNew = (row.data as any).__new === true;
+      delete (row.data as any).__new;
+      const cols = Object.keys(row.data).filter(c => c !== pk || !isNew);
+      const vals = cols.map(c => row.data[c]);
+      if (isNew) {
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const sql = `INSERT INTO ${tbl} (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+        const r = await query(sql, vals as unknown[]);
+        if (r[0]) row.data = r[0] as any;
+      } else {
+        const setClauses = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+        vals.push(row.data[pk]);
+        const sql = `UPDATE ${tbl} SET ${setClauses} WHERE ${pk} = $${cols.length + 1} RETURNING *`;
+        const r = await query(sql, vals as unknown[]);
+        if (r[0]) row.data = r[0] as any;
+      }
+      return row;
+    }
+    case 'bo.delete': {
+      const row = args[0] as Row | undefined;
+      if (!isRow(row)) throw new RuntimeError(loc, 'bo.delete: first arg must be a row');
+      const info = row.entity ? ctx.bos.get(row.entity) : undefined;
+      const tbl  = info?.table ?? entityToTable(ctx, row.entity ?? '');
+      const pk   = info?.primaryKey ?? 'id';
+      await query(`DELETE FROM ${tbl} WHERE ${pk} = $1`, [row.data[pk]]);
+      return null;
+    }
+
+    // ─── Phase 17: outbound HTTP ────────────────────────────────────
+    case 'httpRequest.create': {
+      const url = String(args[0] ?? '');
+      const opts = (args[1] as any) ?? {};
+      const headers: Record<string, string> = {};
+      if (opts.headers && typeof opts.headers === 'object') {
+        for (const [k, v] of Object.entries(opts.headers)) headers[k] = String(v);
+      }
+      const init: RequestInit = { method: String(opts.method ?? 'GET'), headers };
+      if (opts.body !== undefined && opts.body !== null) {
+        init.body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
+      }
+      const res = await fetch(url, init);
+      const body = await res.text();
+      return {
+        __kind: 'HttpReq', url, status: res.status, body,
+        headers: Object.fromEntries(res.headers.entries()),
+      } as any;
+    }
+    case 'httpRequest.responseBody': {
+      const h = args[0] as any;
+      return (h && h.__kind === 'HttpReq') ? String(h.body ?? '') : '';
+    }
+    case 'httpRequest.responseStatus': {
+      const h = args[0] as any;
+      return (h && h.__kind === 'HttpReq') ? (h.status as number) : 0;
+    }
+
+    // ─── Phase 18: real auth + sessions ─────────────────────────────
     case 'qualifier.call': {
-      // qualifier.call('session/cookie:authenticate') is the runtime hook
-      // for cookie auth. Phase 7 minimum: always return true. Real
-      // session storage lands in a follow-up.
+      // qualifier.call('session/cookie:authenticate') validates the
+      // session cookie against cms_session. Returns true if a
+      // non-expired session exists; populates ctx.session for
+      // downstream session.get / session.set calls.
       const ref = String(args[0] ?? '');
-      if (ref.endsWith(':authenticate')) return true;
+      if (ref.endsWith(':authenticate')) return await authenticateSession(ctx);
+      return null;
+    }
+    case 'session.get': {
+      const k = String(args[0] ?? '');
+      return (ctx.session?.payload?.[k] ?? null) as Value;
+    }
+    case 'session.set': {
+      const k = String(args[0] ?? '');
+      ctx.session = ctx.session ?? { id: '', payload: {} };
+      ctx.session.payload[k] = args[1] ?? null;
+      ctx.sessionDirty = true;
       return null;
     }
 
     default:
       throw new RuntimeError(loc, `unimplemented call: ${key}`);
+  }
+}
+
+async function authenticateSession(ctx: Ctx): Promise<boolean> {
+  const cookie = String(ctx.req.headers?.cookie ?? '');
+  const m = cookie.match(/(?:^|;\s*)cmsv_sid=([^;]+)/);
+  if (!m) return false;
+  const sid = decodeURIComponent(m[1]!);
+  try {
+    const rows = await query(
+      `SELECT payload FROM cms_session WHERE id = $1 AND expires_at > now()`,
+      [sid]
+    );
+    if (!rows[0]) return false;
+    ctx.session = { id: sid, payload: rows[0].payload as Record<string, unknown> };
+    return true;
+  } catch {
+    // Table might not exist yet — treat as unauthenticated.
+    return false;
   }
 }
 

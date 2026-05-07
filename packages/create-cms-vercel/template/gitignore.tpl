@@ -3,8 +3,6 @@ node_modules/
 .env
 .env.local
 .env.*.local
-.cmsv/
 dist/
-packages/*/dist/
 *.log
 .DS_Store

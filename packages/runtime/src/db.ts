@@ -5,7 +5,7 @@
  * suspend behaviour.
  */
 
-import { Pool, PoolClient } from 'pg';
+import { Pool } from 'pg';
 
 let _pool: Pool | null = null;
 

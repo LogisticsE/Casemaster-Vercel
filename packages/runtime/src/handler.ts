@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadApp, AppRegistry } from './loader.js';
 import { callFunction, Ctx } from './eval.js';
+import { newSessionId, persistSession, buildCookie } from './session.js';
 
 export interface CreateHandlerOptions {
   /** Absolute or process.cwd()-relative path to the .cms application. */
@@ -135,6 +136,16 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
       };
 
       await callFunction(ctx, fnName, []);
+
+      // Phase 18: write the session back if the function called session.set.
+      // New sessions get a generated id + Set-Cookie header.
+      if (ctx.sessionDirty) {
+        if (!ctx.session?.id) {
+          ctx.session = { id: newSessionId(), payload: ctx.session?.payload ?? {} };
+          res.setHeader('Set-Cookie', buildCookie(ctx.session.id));
+        }
+        await persistSession(ctx.session.id, ctx.session.payload);
+      }
 
       if (ctx.res.redirect) {
         res.status(302).setHeader('Location', ctx.res.redirect).send('');
