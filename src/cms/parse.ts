@@ -18,9 +18,26 @@ export class ParseError extends Error {
   }
 }
 
-export function parse(toks: Tok[], file: string): A.Func[] {
+export interface ParsedFile {
+  funcs: A.Func[];
+  resources: A.Resource[];
+}
+
+export function parse(toks: Tok[], file: string): ParsedFile {
   const p = new Parser(toks, file);
   return p.parseFile();
+}
+
+/**
+ * Parse a free-standing expression — used by resolveTemplate to evaluate
+ * a single `{{…}}` chunk. Toks should be the lex output of the chunk's
+ * source, no surrounding `function` / `end-function`.
+ */
+export function parseExpression(toks: Tok[], file: string): A.Expr {
+  const p = new Parser(toks, file);
+  p.skipNL();
+  const e = p.parseExprPublic();
+  return e;
 }
 
 class Parser {
@@ -46,9 +63,14 @@ class Parser {
   }
   skipNL() { while (this.peek().kind === 'NEWLINE') this.i++; }
 
+  // Public wrapper for the standalone expression parser. Called by
+  // parseExpression() above (for resolveTemplate's {{…}} chunks).
+  parseExprPublic(): A.Expr { return this.parseExpr(); }
+
   // ─── Top level ─────────────────────────────────────────────
-  parseFile(): A.Func[] {
+  parseFile(): ParsedFile {
     const funcs: A.Func[] = [];
+    const resources: A.Resource[] = [];
     this.skipNL();
     while (!this.eof()) {
       if (this.peek().kind === 'KW_INHERITS') {
@@ -65,21 +87,27 @@ class Parser {
         continue;
       }
       if (this.peek().kind === 'KW_RESOURCE') {
-        // Skip resources for Phase 1 — ping doesn't use them.
-        this.skipResource();
+        resources.push(this.parseResource());
         this.skipNL();
         continue;
       }
-      // Anything else at top level: skip the line silently for Phase 1
-      // forgiveness. (Real validator: Phase 10.)
+      // Anything else at top level: skip the token to keep the parser
+      // forward-progressing on unknown directives. Phase 10 adds a
+      // strict validator.
       this.i++;
     }
-    return funcs;
+    return { funcs, resources };
   }
 
-  skipResource() {
-    while (!this.eof() && this.peek().kind !== 'KW_END_RESOURCE') this.i++;
-    if (!this.eof()) this.i++;
+  parseResource(): A.Resource {
+    const loc = this.loc();
+    this.eat('KW_RESOURCE');
+    const name = this.eat('IDENT').value;
+    this.skipNL();
+    const body = this.parseExpr();
+    this.skipNL();
+    this.eat('KW_END_RESOURCE');
+    return { kind: 'Resource', name, body, loc };
   }
 
   // ─── Function ──────────────────────────────────────────────
@@ -280,13 +308,18 @@ class Parser {
       path.push(this.eat('IDENT').value);
     }
     const props: Record<string, A.Expr> = {};
+    let positional = 0;
     while (this.peek().kind !== 'RANG' && this.peek().kind !== 'EOF') {
       this.skipNL();
       if (this.peek().kind === 'RANG') break;
-      const name = this.eat('IDENT').value;
-      this.eat('COLON');
-      const value = this.parseExpr();
-      props[name] = value;
+      // Named arg vs positional — `<@page/html "literal">` is positional.
+      if (this.peek().kind === 'IDENT' && this.peek(1).kind === 'COLON') {
+        const name = this.eat('IDENT').value;
+        this.eat('COLON');
+        props[name] = this.parseExpr();
+      } else {
+        props[String(positional++)] = this.parseExpr();
+      }
       if (this.peek().kind === 'COMMA') this.i++;
       this.skipNL();
     }

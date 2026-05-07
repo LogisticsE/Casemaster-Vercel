@@ -11,6 +11,9 @@
 
 import * as A from './ast.js';
 import { query } from './db.js';
+// render.ts is imported lazily inside dispatch() so eval ↔ render don't
+// form a TDZ-time circular import.
+import type { Resource } from './ast.js';
 
 export type Value =
   | string | number | boolean | null
@@ -58,9 +61,10 @@ export class Scope {
 }
 
 export interface Ctx {
-  // Module-level registry: function name → AST. For Phase 1 a single
-  // file is loaded; later phases will key by (script, fn).
-  funcs: Map<string, A.Func>;
+  // Module-level registry: function name → AST. Phase 4 will add (script, fn).
+  funcs:     Map<string, A.Func>;
+  // Phase 2: page.get('./name') reads from this map.
+  resources: Map<string, Resource>;
   // Mutable response state, drained at the end.
   res: { contentType: string; body: string; status: number; headers: Record<string,string>; redirect?: string };
   // Request inputs.
@@ -140,7 +144,7 @@ async function execStmt(ctx: Ctx, scope: Scope, s: A.Stmt): Promise<void> {
   }
 }
 
-async function evalExpr(ctx: Ctx, scope: Scope, e: A.Expr): Promise<Value> {
+export async function evalExpr(ctx: Ctx, scope: Scope, e: A.Expr): Promise<Value> {
   switch (e.kind) {
     case 'StrLit':  return e.value;
     case 'NumLit':  return e.value;
@@ -310,6 +314,36 @@ async function dispatch(
       ctx.res.redirect = String(args[0] ?? '');
       ctx.res.status = 302;
       return null;
+    }
+
+    case 'page.get': {
+      // page.get('./resourceName') — looks up `resource <name> … end-resource`
+      // and evaluates its body in a fresh scope (so variables set inside don't
+      // leak). Resources are values; the caller decides what to do with them
+      // (typically `set('main', page.get('./fooBody'))`).
+      const ref = String(args[0] ?? '');
+      const name = ref.startsWith('./') ? ref.slice(2) : ref;
+      const r = ctx.resources.get(name);
+      if (!r) throw new RuntimeError(loc, `page.get: resource not found: ${ref}`);
+      // Resources see the caller's scope so they can read [main], [tabActive], etc.
+      return await evalExpr(ctx, scope, r.body);
+    }
+
+    case 'page.render': {
+      // page.render(rootValue) — render the value to HTML and write it as
+      // the response body. The .cms convention is that this is the last
+      // call in a function; nothing meaningful happens after it.
+      const { renderValue } = await import('./render.js');
+      const html = await renderValue(ctx, scope, args[0] ?? null);
+      ctx.res.contentType = 'text/html; charset=utf-8';
+      ctx.res.body = html;
+      return null;
+    }
+
+    case 'resolveTemplate': {
+      // resolveTemplate(`…{{ expr }}…`) — substitute each {{…}} chunk.
+      const { resolveTemplate } = await import('./render.js');
+      return await resolveTemplate(ctx, scope, String(args[0] ?? ''));
     }
 
     default:

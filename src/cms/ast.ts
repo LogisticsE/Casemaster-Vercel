@@ -11,7 +11,7 @@ export interface Loc {
   col: number;
 }
 
-export type Node = Func | Stmt | Expr;
+export type Node = Func | Resource | Stmt | Expr;
 
 // ─── Top-level ─────────────────────────────────────────────────────
 export interface Func {
@@ -19,6 +19,15 @@ export interface Func {
   name: string;
   params: string[];
   body: Stmt[];
+  loc: Loc;
+}
+
+export interface Resource {
+  kind: 'Resource';
+  name: string;
+  // The resource body is a single expression — usually a `<@page/...>`
+  // qualifier — that's evaluated lazily on `page.get('./name')`.
+  body: Expr;
   loc: Loc;
 }
 

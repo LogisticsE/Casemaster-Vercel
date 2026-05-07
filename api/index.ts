@@ -95,7 +95,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const ctx: Ctx = {
-      funcs: reg.funcs,
+      funcs:     reg.funcs,
+      resources: reg.resources,
       req: {
         method: req.method ?? 'GET',
         url: url.toString(),
