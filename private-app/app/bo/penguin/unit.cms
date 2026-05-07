@@ -1,0 +1,42 @@
+// One handling unit (crate) on a Penguin order. Carries the assigned locker
+// (locker_display_name like "C1 R2") which the picker UI joins on.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Penguin unit',
+        table: 'penguin_unit_v2',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id:                  <@bo/attribute label: 'ID',                  column: 'id',                  dataType: dataType.Long,    length: 18, optional: false()>,
+            order_id:            <@bo/attribute label: 'Order',               column: 'parent_order',        dataType: dataType.Long,    length: 18, foreignKey: 'penguin/order'>,
+            lms_unit_id:         <@bo/attribute label: 'LMS unit id',         column: 'lms_unit_id',         dataType: dataType.Long,    length: 12>,
+            name:                <@bo/attribute label: 'Name',                column: 'name',                dataType: dataType.String,  length: 200>,
+            description:         <@bo/attribute label: 'Description',         column: 'description',         dataType: dataType.String,  length: 1000>,
+            height:              <@bo/attribute label: 'Height (cm)',         column: 'height',              dataType: dataType.Decimal, length: 8, precision: 2>,
+            width:               <@bo/attribute label: 'Width (cm)',          column: 'width',               dataType: dataType.Decimal, length: 8, precision: 2>,
+            length_cm:           <@bo/attribute label: 'Length (cm)',         column: 'length',              dataType: dataType.Decimal, length: 8, precision: 2>,
+            temperature:         <@bo/attribute label: 'Temperature',         column: 'temperature',         dataType: dataType.Long,    length: 4>,
+            upside_down:         <@bo/attribute label: 'Upside down',         column: 'upside_down',         dataType: dataType.String,  length: 1, caseSensitive: true()>,
+            quantity:            <@bo/attribute label: 'Quantity',            column: 'quantity',            dataType: dataType.Long,    length: 6>,
+            unit_status:         <@bo/attribute label: 'Status',              column: 'unit_status',         dataType: dataType.String,  length: 20, caseSensitive: true()>,
+            expiry_date:         <@bo/attribute label: 'Expiry',              column: 'expiry_date',         dataType: dataType.Timestamp>,
+            delivery_code:       <@bo/attribute label: 'Delivery code',       column: 'delivery_code',       dataType: dataType.String,  length: 80>,
+            picking_code:        <@bo/attribute label: 'Picking code',        column: 'picking_code',        dataType: dataType.String,  length: 80>,
+            delivery_date:       <@bo/attribute label: 'Delivered',           column: 'delivery_date',       dataType: dataType.Timestamp>,
+            picking_date:        <@bo/attribute label: 'Picked',              column: 'picking_date',        dataType: dataType.Timestamp>,
+            locker_lms_id:       <@bo/attribute label: 'Locker LMS id',       column: 'locker_lms_id',       dataType: dataType.Long,    length: 12>,
+            locker_name:         <@bo/attribute label: 'Locker name',         column: 'locker_name',         dataType: dataType.String,  length: 80>,
+            locker_display_name: <@bo/attribute label: 'Locker display name', column: 'locker_display_name', dataType: dataType.String,  length: 80>,
+            locker_external_id:  <@bo/attribute label: 'Locker external id',  column: 'locker_external_id',  dataType: dataType.String,  length: 80>
+        >,
+        attributeGroups: <
+            label: < 'name' >,
+            list:  < 'name', 'temperature', 'unit_status', 'locker_display_name', 'delivery_code' >
+        >
+    >
+end-resource

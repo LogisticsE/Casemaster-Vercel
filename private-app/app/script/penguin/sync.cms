@@ -1,0 +1,512 @@
+// Penguin LMS sync — pulls all current booking orders for the configured
+// station via POST /orders {id:0}, upserts into penguin_order + penguin_unit,
+// and touches penguin_compartment.last_seen_at for any locker we observe.
+//
+// SQL strategy mirrors axylog/sync.cms: every upsert goes through sql.execute
+// INSERT ... ON CONFLICT DO UPDATE (the BIGSERIAL-id BO insert path silently
+// no-ops in this CaseMaster build).
+//
+// Public: run() returns < started_at, finished_at, orders, units, error >.
+
+
+// Days-in-month for (y, m). Naive leap-year rule (y % 4 = 0); good through
+// year 2099. CMS has no `mod`, so we synthesise via sub/mul/div.
+function _daysInMonth(y, m)
+    if eq([m], 1)  return 31  end-if
+    if eq([m], 2)
+        if eq(sub([y], mul(div([y], 4), 4)), 0)
+            return 29
+        end-if
+        return 28
+    end-if
+    if eq([m], 3)  return 31  end-if
+    if eq([m], 4)  return 30  end-if
+    if eq([m], 5)  return 31  end-if
+    if eq([m], 6)  return 30  end-if
+    if eq([m], 7)  return 31  end-if
+    if eq([m], 8)  return 31  end-if
+    if eq([m], 9)  return 30  end-if
+    if eq([m], 10) return 31  end-if
+    if eq([m], 11) return 30  end-if
+    return 31
+end-function
+
+
+// ── Date math ──────────────────────────────────────────────
+// Add `offset` days to a YYYY-MM-DD string, return YYYY-MM-DD. CMS has no
+// string-to-date parser and no `mod`, so we do it manually. Handles any
+// reasonable small offset (-31..+31). Leap years computed via Y mod 4
+// only (close enough through 2099; we won't be running this code after
+// that, and 2100 isn't a leap year — patch then if needed).
+function addDaysYmd(ymd, offset)
+    set('y', 0)
+    set('m', 0)
+    set('d', 0)
+    set('idx', 0)
+    iterate iterator.ofToken([ymd], '-', 't')
+        if eq([idx], 0)
+            set('y', lng([t]))
+        else
+            if eq([idx], 1)
+                set('m', lng([t]))
+            else
+                set('d', lng([t]))
+            end-if
+        end-if
+        set('idx', sum([idx], 1))
+    end-iterate
+
+    set('d', sum([d], [offset]))
+
+    // Forward roll
+    iterate iterator.ofNumber(1, 50, 'i')
+        set('dim', script.call('./_daysInMonth', [y], [m]))
+        if le([d], [dim])
+            exit
+        end-if
+        set('d', sub([d], [dim]))
+        set('m', sum([m], 1))
+        if gt([m], 12)
+            set('m', 1)
+            set('y', sum([y], 1))
+        end-if
+    end-iterate
+
+    // Backward roll
+    iterate iterator.ofNumber(1, 50, 'i')
+        if gt([d], 0)
+            exit
+        end-if
+        set('m', sub([m], 1))
+        if eq([m], 0)
+            set('m', 12)
+            set('y', sub([y], 1))
+        end-if
+        set('dim', script.call('./_daysInMonth', [y], [m]))
+        set('d', sum([d], [dim]))
+    end-iterate
+
+    return concat(
+        formatString('{0}', [y]), '-',
+        if(lt([m], 10), '0', ''), formatString('{0}', [m]), '-',
+        if(lt([d], 10), '0', ''), formatString('{0}', [d])
+    )
+end-function
+
+
+// ── SQL helpers ────────────────────────────────────────────
+function sqlStr(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return concat("'", replace(formatString('{0}', [v]), "'", "''"), "'")
+end-function
+
+function sqlNum(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return formatString('{0}', [v])
+end-function
+
+function sqlDt(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return _onError(
+        concat("'", format([v], 'yyyy-MM-dd HH:mm:ss', 'EN'), "'"),
+        script.call('./sqlStr', [v])
+    )
+end-function
+
+
+// ── HTTP: list all current orders (POST /orders {id:0}) ─────────────
+// IMPORTANT: Content-Type MUST be 'text/plain', not 'application/json'.
+// Penguin's API Gateway strips the Authorization header on application/json
+// requests (Lambda then sees no auth → returns error_code 10 "Authorization
+// bearer required"). Working test code from another CaseMaster install
+// confirms `text/plain` is the only content-type that gets through.
+function fetchOrders(env)
+    set('payload', '{"id":0}')
+    try
+        set('req', httpRequest.create(concat(pb.get([env], 'BASE_URL'), '/orders')))
+        httpRequest.setHeader([req], 'Content-Type',  'text/plain')
+        httpRequest.setHeader([req], 'Authorization', concat('Bearer ', pb.get([env], 'BEARER_TOKEN')))
+        httpRequest.setBody  ([req], [payload])
+        httpRequest.post     ([req])
+
+        if ne(httpRequest.responseStatusCode([req]), 200)
+            raise exceptionType.fatal,
+                formatString('Penguin fetch failed [{0}] {1}',
+                    httpRequest.responseStatusCode([req]),
+                    httpRequest.responseBody([req])
+                )
+        end-if
+
+        set('parsed', json.parse(httpRequest.responseBody([req])))
+        set('result', json.json2pb([parsed]))
+
+        // Even on HTTP 200 the body carries an error_code; surface non-zero.
+        set('status',    pb.get([result], 'status'))
+        set('errorCode', _onError(pb.get([status], 'error_code'), 0))
+        if ne([errorCode], 0)
+            raise exceptionType.fatal,
+                formatString('Penguin API error [code={0}] {1}',
+                    [errorCode],
+                    pb.get([status], 'error_message')
+                )
+        end-if
+
+    finally
+        if inContext('req')
+            httpRequest.dispose([req])
+        end-if
+    end-try
+
+    return [result]
+end-function
+
+
+// ── Upserts ────────────────────────────────────────────────
+// Order natural key: (station_id, lms_order_id). The LMS guarantees lms_order_id
+// is unique per station; using it as the conflict key lets us update in place.
+function upsertOrder(stationId, order)
+    set('rawJson', json.pb2json([order], formatted: false()))
+    set('orderBlock',   pb.get([order], 'order'))
+    set('endUserBlock', pb.get([order], 'end_user'))
+    set('slotBlock',    pb.get([order], 'time_slot'))
+
+    set('lmsId',       pb.get([orderBlock], 'id'))
+    set('orderName',   pb.get([orderBlock], 'name'))
+    set('extId',       pb.get([orderBlock], 'external_id'))
+    set('descr',       pb.get([orderBlock], 'description'))
+
+    set('eUserId',     pb.get([endUserBlock], 'id'))
+    set('eUserName',   pb.get([endUserBlock], 'name'))
+    set('eUserEmail',  pb.get([endUserBlock], 'email'))
+    set('eUserPhone',  pb.get([endUserBlock], 'phone'))
+
+    set('tBegin',      pb.get([slotBlock], 'begin'))
+    set('tEnd',        pb.get([slotBlock], 'end'))
+    set('tPicking',    pb.get([slotBlock], 'picking'))
+
+    set('prm',         pb.get([order], 'prm'))
+    set('createdDt',   pb.get([order], 'creation_date'))
+    set('status',      pb.get([order], 'order_status'))
+
+    sql.execute(concat(
+        'INSERT INTO penguin_order_v2 (locker_station, lms_order_id, name, external_id, description, ',
+        '    end_user_lms_id, end_user_name, end_user_email, end_user_phone, ',
+        '    end_user, ',
+        '    time_begin, time_end, time_picking, prm, creation_date, order_status, raw_payload) VALUES (',
+        [stationId], ', ',
+        script.call('./sqlNum', [lmsId]),     ', ',
+        script.call('./sqlStr', [orderName]), ', ',
+        script.call('./sqlStr', [extId]),     ', ',
+        script.call('./sqlStr', [descr]),     ', ',
+        script.call('./sqlNum', [eUserId]),   ', ',
+        script.call('./sqlStr', [eUserName]), ', ',
+        script.call('./sqlStr', [eUserEmail]),', ',
+        script.call('./sqlStr', [eUserPhone]),', ',
+        '(SELECT id FROM account_contact WHERE locker_user_id=', script.call('./sqlStr', formatString('{0}', [eUserId])), ' LIMIT 1), ',
+        script.call('./sqlDt',  [tBegin]),    ', ',
+        script.call('./sqlDt',  [tEnd]),      ', ',
+        script.call('./sqlDt',  [tPicking]),  ', ',
+        script.call('./sqlStr', [prm]),       ', ',
+        script.call('./sqlDt',  [createdDt]), ', ',
+        script.call('./sqlStr', [status]),    ', ',
+        script.call('./sqlStr', [rawJson]),   '::jsonb',
+        ') ON CONFLICT (locker_station, lms_order_id) DO UPDATE SET ',
+            'name             = COALESCE(EXCLUDED.name,             penguin_order_v2.name), ',
+            'external_id      = COALESCE(EXCLUDED.external_id,      penguin_order_v2.external_id), ',
+            'description      = COALESCE(EXCLUDED.description,      penguin_order_v2.description), ',
+            'end_user_lms_id  = COALESCE(EXCLUDED.end_user_lms_id,  penguin_order_v2.end_user_lms_id), ',
+            'end_user_name    = COALESCE(EXCLUDED.end_user_name,    penguin_order_v2.end_user_name), ',
+            'end_user_email   = COALESCE(EXCLUDED.end_user_email,   penguin_order_v2.end_user_email), ',
+            'end_user_phone   = COALESCE(EXCLUDED.end_user_phone,   penguin_order_v2.end_user_phone), ',
+            'end_user         = COALESCE(EXCLUDED.end_user,         penguin_order_v2.end_user), ',
+            'time_begin       = COALESCE(EXCLUDED.time_begin,       penguin_order_v2.time_begin), ',
+            'time_end         = COALESCE(EXCLUDED.time_end,         penguin_order_v2.time_end), ',
+            'time_picking     = COALESCE(EXCLUDED.time_picking,     penguin_order_v2.time_picking), ',
+            'prm              = COALESCE(EXCLUDED.prm,              penguin_order_v2.prm), ',
+            'creation_date    = COALESCE(EXCLUDED.creation_date,    penguin_order_v2.creation_date), ',
+            'order_status     = COALESCE(EXCLUDED.order_status,     penguin_order_v2.order_status), ',
+            'raw_payload      = EXCLUDED.raw_payload, ',
+            'cm_updated_when  = now()'
+    ))
+
+    if not(bo.tryLoad('penguin/order',
+                      where: concat('station_id=', [stationId],
+                                    ' & lms_order_id=', script.call('./sqlNum', [lmsId])),
+                      group: 'list',
+                      bo:    'po'))
+        return null()
+    end-if
+    return bo.pk([po])
+end-function
+
+
+// Unit natural key: (order_id, lms_unit_id).
+function upsertUnit(orderId, unit)
+    set('rawJson',     json.pb2json([unit], formatted: false()))
+    set('lmsId',       pb.get([unit], 'id'))
+    set('uName',       pb.get([unit], 'name'))
+    set('descr',       pb.get([unit], 'description'))
+    set('h',           pb.get([unit], 'height'))
+    set('w',           pb.get([unit], 'width'))
+    set('l',           pb.get([unit], 'length'))
+    set('temp',        pb.get([unit], 'temperature'))
+    set('upDown',      pb.get([unit], 'upside_down'))
+    set('qty',         pb.get([unit], 'quantity'))
+    set('uStatus',     pb.get([unit], 'status'))
+    set('expiry',      pb.get([unit], 'expiry_date'))
+    set('dCode',       pb.get([unit], 'delivery_code'))
+    set('pCode',       pb.get([unit], 'picking_code'))
+    set('dDate',       pb.get([unit], 'delivery_date'))
+    set('pDate',       pb.get([unit], 'picking_date'))
+
+    set('lockBlock',   pb.get([unit], 'locker'))
+    set('lockId',      pb.get([lockBlock], 'id'))
+    set('lockName',    pb.get([lockBlock], 'name'))
+    set('lockDisp',    pb.get([lockBlock], 'display_name'))
+    set('lockExt',     pb.get([lockBlock], 'external_id'))
+
+    sql.execute(concat(
+        'INSERT INTO penguin_unit_v2 (parent_order, lms_unit_id, name, description, ',
+        '    height, width, length, temperature, upside_down, quantity, ',
+        '    unit_status, expiry_date, delivery_code, picking_code, delivery_date, picking_date, ',
+        '    locker_lms_id, locker_name, locker_display_name, locker_external_id, raw_payload) VALUES (',
+        [orderId], ', ',
+        script.call('./sqlNum', [lmsId]),    ', ',
+        script.call('./sqlStr', [uName]),    ', ',
+        script.call('./sqlStr', [descr]),    ', ',
+        script.call('./sqlNum', [h]),        ', ',
+        script.call('./sqlNum', [w]),        ', ',
+        script.call('./sqlNum', [l]),        ', ',
+        script.call('./sqlNum', [temp]),     ', ',
+        script.call('./sqlStr', [upDown]),   ', ',
+        script.call('./sqlNum', [qty]),      ', ',
+        script.call('./sqlStr', [uStatus]),  ', ',
+        script.call('./sqlDt',  [expiry]),   ', ',
+        script.call('./sqlStr', [dCode]),    ', ',
+        script.call('./sqlStr', [pCode]),    ', ',
+        script.call('./sqlDt',  [dDate]),    ', ',
+        script.call('./sqlDt',  [pDate]),    ', ',
+        script.call('./sqlNum', [lockId]),   ', ',
+        script.call('./sqlStr', [lockName]), ', ',
+        script.call('./sqlStr', [lockDisp]), ', ',
+        script.call('./sqlStr', [lockExt]),  ', ',
+        script.call('./sqlStr', [rawJson]),  '::jsonb',
+        ') ON CONFLICT (parent_order, lms_unit_id) DO UPDATE SET ',
+            'name                = COALESCE(EXCLUDED.name,                penguin_unit_v2.name), ',
+            'description         = COALESCE(EXCLUDED.description,         penguin_unit_v2.description), ',
+            'height              = COALESCE(EXCLUDED.height,              penguin_unit_v2.height), ',
+            'width               = COALESCE(EXCLUDED.width,               penguin_unit_v2.width), ',
+            'length              = COALESCE(EXCLUDED.length,              penguin_unit_v2.length), ',
+            'temperature         = COALESCE(EXCLUDED.temperature,         penguin_unit_v2.temperature), ',
+            'upside_down         = COALESCE(EXCLUDED.upside_down,         penguin_unit_v2.upside_down), ',
+            'quantity            = COALESCE(EXCLUDED.quantity,            penguin_unit_v2.quantity), ',
+            'unit_status         = COALESCE(EXCLUDED.unit_status,         penguin_unit_v2.unit_status), ',
+            'expiry_date         = COALESCE(EXCLUDED.expiry_date,         penguin_unit_v2.expiry_date), ',
+            'delivery_code       = COALESCE(EXCLUDED.delivery_code,       penguin_unit_v2.delivery_code), ',
+            'picking_code        = COALESCE(EXCLUDED.picking_code,        penguin_unit_v2.picking_code), ',
+            'delivery_date       = COALESCE(EXCLUDED.delivery_date,       penguin_unit_v2.delivery_date), ',
+            'picking_date        = COALESCE(EXCLUDED.picking_date,        penguin_unit_v2.picking_date), ',
+            'locker_lms_id       = COALESCE(EXCLUDED.locker_lms_id,       penguin_unit_v2.locker_lms_id), ',
+            'locker_name         = COALESCE(EXCLUDED.locker_name,         penguin_unit_v2.locker_name), ',
+            'locker_display_name = COALESCE(EXCLUDED.locker_display_name, penguin_unit_v2.locker_display_name), ',
+            'locker_external_id  = COALESCE(EXCLUDED.locker_external_id,  penguin_unit_v2.locker_external_id), ',
+            'raw_payload         = EXCLUDED.raw_payload'
+    ))
+
+    return [lockDisp]
+end-function
+
+
+// ── End-user sync ───────────────────────────────────────────
+// POST /endusers {id:0} → list of all end users for this customer. Same
+// Content-Type: text/plain quirk as /orders.
+function fetchEndUsers(env)
+    set('payload', '{"id":0}')
+    try
+        set('req', httpRequest.create(concat(pb.get([env], 'BASE_URL'), '/endusers')))
+        httpRequest.setHeader([req], 'Content-Type',  'text/plain')
+        httpRequest.setHeader([req], 'Authorization', concat('Bearer ', pb.get([env], 'BEARER_TOKEN')))
+        httpRequest.setBody  ([req], [payload])
+        httpRequest.post     ([req])
+        if ne(httpRequest.responseStatusCode([req]), 200)
+            raise exceptionType.fatal,
+                formatString('Penguin /endusers HTTP {0} {1}',
+                    httpRequest.responseStatusCode([req]),
+                    httpRequest.responseBody([req]))
+        end-if
+        set('parsed', json.parse(httpRequest.responseBody([req])))
+        set('result', json.json2pb([parsed]))
+        set('errCode', _onError(pb.get([result], 'status/error_code'), 0))
+        if ne([errCode], 0)
+            raise exceptionType.fatal,
+                formatString('Penguin API error [code={0}] {1}',
+                    [errCode], pb.get([result], 'status/error_message'))
+        end-if
+    finally
+        if inContext('req')
+            httpRequest.dispose([req])
+        end-if
+    end-try
+    return [result]
+end-function
+
+function upsertEndUser(stationId, user)
+    set('rawJson', json.pb2json([user], formatted: false()))
+    set('lmsId',   pb.get([user], 'id'))
+    set('uName',   pb.get([user], 'name'))
+    set('uComp',   pb.get([user], 'company'))
+    set('uEmail',  pb.get([user], 'email'))
+    set('uPhone',  pb.get([user], 'phone'))
+    set('uDcode',  pb.get([user], 'delivery_code'))
+    set('uPcode',  pb.get([user], 'picking_code'))
+
+    // Upsert into account_contact, attached to the auto-created
+    // "Penguin LMS endusers (auto)" account. The unique key is
+    // locker_user_id (Penguin's id stringified). Penguin's `company` lives
+    // outside this row in account_account.name so we don't store it here;
+    // delivery/picking codes go into notes for now.
+    set('placeholderAccountSql',
+        "(SELECT id FROM account_account WHERE name = 'Penguin LMS endusers (auto)' LIMIT 1)"
+    )
+    sql.execute(concat(
+        'INSERT INTO account_contact (account, name, email, telephone1, locker_user_id, raw_lms_user, status) VALUES (',
+        [placeholderAccountSql], ', ',
+        script.call('./sqlStr', [uName]),  ', ',
+        script.call('./sqlStr', [uEmail]), ', ',
+        script.call('./sqlStr', [uPhone]), ', ',
+        script.call('./sqlStr', formatString('{0}', [lmsId])), ', ',
+        script.call('./sqlStr', [rawJson]), '::jsonb, ',
+        "'1'",
+        ') ON CONFLICT (locker_user_id) DO UPDATE SET ',
+            'name            = COALESCE(EXCLUDED.name,         account_contact.name), ',
+            'email           = COALESCE(EXCLUDED.email,        account_contact.email), ',
+            'telephone1      = COALESCE(EXCLUDED.telephone1,   account_contact.telephone1), ',
+            'raw_lms_user    = EXCLUDED.raw_lms_user, ',
+            'cm_updated_when = now()'
+    ))
+    return null()
+end-function
+
+
+// Mark this compartment as observed (creates the row if first sighting).
+function touchCompartment(stationId, displayName)
+    if isNull([displayName])
+        return null()
+    end-if
+    sql.execute(concat(
+        'INSERT INTO rd_locker_compartment (locker_station, display_name, last_seen_at) VALUES (',
+        [stationId], ', ',
+        script.call('./sqlStr', [displayName]), ', now()',
+        ') ON CONFLICT (locker_station, display_name) DO UPDATE SET last_seen_at = now()'
+    ))
+    return null()
+end-function
+
+
+// ── Public entry ─────────────────────────────────────────────
+function run()
+    set('env',        script.call('penguin/env:load'))
+    set('stationPk',  pb.get([env], 'ID'))
+
+    // Let Postgres set started_at via the column default (now()), so the
+    // mark-and-sweep comparison below works in PG's native UTC clock — passing
+    // a CMS-formatted string suffers a +2h CEST shift when re-parsed as
+    // timestamptz, which made the sweep delete every active order.
+    sql.execute(concat(
+        'INSERT INTO penguin_api_run (locker_station) VALUES (',
+        [stationPk], ')'
+    ))
+
+    set('runId', null())
+    iterate iterator.ofEntity(
+        entities: < <@iterator/entity name: 'sr', entity: 'penguin/syncRun',
+                                        where:   concat('station_id=', [stationPk]),
+                                        orderBy: '-id'> >,
+        rows: 1
+    )
+        set('runId', bo.attr([sr], 'id'))
+        exit
+    end-iterate
+
+    set('orderCount', 0)
+    set('unitCount',  0)
+    set('errMsg',     null())
+
+    try
+        // First: end users (so the booking dropdown has fresh data)
+        set('uPayload', script.call('./fetchEndUsers', [env]))
+        set('users',    pb.get(pb.get([uPayload], 'data'), 'endusers'))
+        if isNotNull([users])
+            iterate iterator.ofPB([users], 'u')
+                script.call('./upsertEndUser', [stationPk], [u])
+            end-iterate
+        end-if
+
+        // Then: orders (drives compartment availability)
+        set('payload', script.call('./fetchOrders', [env]))
+        set('data',    pb.get([payload], 'data'))
+        set('orders',  pb.get([data],    'orders'))
+
+        if isNotNull([orders])
+            iterate iterator.ofPB([orders], 'o')
+                set('orderId', script.call('./upsertOrder', [stationPk], [o]))
+                set('orderCount', sum([orderCount], 1))
+
+                set('units', pb.get([o], 'units'))
+                if isNotNull([units])
+                    iterate iterator.ofPB([units], 'u')
+                        set('lockDisp',  script.call('./upsertUnit', [orderId], [u]))
+                        script.call('./touchCompartment', [stationPk], [lockDisp])
+                        set('unitCount', sum([unitCount], 1))
+                    end-iterate
+                end-if
+            end-iterate
+        end-if
+
+        // ── Mark-and-sweep ────────────────────────────────────────────
+        // Every upsert above bumped `updated_at = now()`. Any order whose
+        // updated_at is still older than this run's `started_at` was NOT in
+        // Penguin's response — meaning it was deleted in the LMS portal.
+        // Mirror that by deleting locally; ON DELETE CASCADE drops the
+        // associated penguin_unit rows so the grid reflects the deletion.
+        // Comparing to the started_at *stored* in penguin_sync_run keeps
+        // both sides on PG's UTC clock (the alternative — passing a CMS
+        // formatString time — re-parses with a +2h CEST shift and sweeps
+        // everything).
+        // Filtered to RESERVED/BOOKED/STORED — DELIVERED orders are
+        // permanent in Penguin and we keep our copy as historical.
+        sql.execute(concat(
+            'DELETE FROM penguin_order_v2 ',
+            'WHERE locker_station = ', [stationPk], ' ',
+            "AND order_status IN ('RESERVED','BOOKED','STORED') ",
+            'AND cm_updated_when < (SELECT started_at FROM penguin_api_run WHERE id = ', [runId], ')'
+        ))
+
+    catch
+        set('errMsg', error.firstMessage())
+    end-try
+
+    if isNotNull([runId])
+        // Same TZ rule as the INSERT — use PG's now() directly, not a
+        // CMS-formatted string (which suffers a +2h CEST shift on re-parse).
+        sql.execute(concat(
+            'UPDATE penguin_api_run SET finished_at = now(), ',
+                'orders_received = ', [orderCount], ', ',
+                'units_received  = ', [unitCount],  ', ',
+                'error           = ', script.call('./sqlStr', [errMsg]),
+            ' WHERE id = ', [runId]
+        ))
+    end-if
+
+    return <
+        orders: [orderCount],
+        units:  [unitCount],
+        error:  [errMsg]
+    >
+end-function

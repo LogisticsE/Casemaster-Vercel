@@ -37,11 +37,8 @@ both('runtime parity', () => {
     });
   }
 
-  it('maintenance list page renders 200 on cms-vercel', async () => {
-    const r = await fetch(`${VERCEL}/maintenance/qr/labelTemplate`);
-    expect(r.status).toBe(200);
-    const body = await r.text();
-    expect(body).toContain('<table');
-    expect(body).toContain('+ New');
-  });
+  // Maintenance parity is gated on having shared BOs declared on both
+  // runtimes. The public demo deploy ships with no BOs (project-specific
+  // ones live in private-app/), so this assertion has nothing to test
+  // against — re-enable when we add a generic example BO.
 });

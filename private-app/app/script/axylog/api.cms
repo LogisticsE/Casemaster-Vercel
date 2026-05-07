@@ -1,0 +1,174 @@
+// Axylog API wrapper. Calls our FastAPI on http://localhost:8000 via the
+// runtime's httpRequest primitive (see runtime/qualifier/oauth.cms for the
+// canonical usage pattern). Each public function returns a property bag
+// (json.json2pb) that pages can drive with iterator.ofPB.
+
+function getJson(path)
+    // Build the absolute URL
+    set('url', formatString('http://localhost:8000{0}', [path]))
+
+    try
+        // Open the HTTP request
+        set('request', httpRequest.create([url]))
+        httpRequest.setHeader([request], 'accept', 'application/json')
+        httpRequest.get([request])
+
+        // Bail on non-2xx
+        if or(
+            lt(httpRequest.responseStatusCode([request]), 200),
+            gt(httpRequest.responseStatusCode([request]), 299)
+        )
+            raise exceptionType.fatal,
+                formatString('Axylog API error [{0}] {1}: {2}',
+                    httpRequest.responseStatusCode([request]),
+                    [url],
+                    httpRequest.responseBody([request])
+                )
+
+        end-if
+
+        // Parse the body — JSON → property bag for downstream iteration.
+        // FastAPI list endpoints return a top-level JSON array, which `json.json2pb`
+        // can't surface as a sequence we can iterate directly. Wrapping the body in
+        // `{"items": [...]}` when it starts with `[` gives us a stable PB shape
+        // (`pb.get([result], 'items')` returns the iterable).
+        set('body', httpRequest.responseBody([request]))
+        if startsWith(trim([body]), '[')
+            set('body', formatString('{{"items":{0}}}', [body]))
+        end-if
+        set('parsed', json.parse([body]))
+        set('result', json.json2pb([parsed]))
+
+    finally
+        if inContext('request')
+            httpRequest.dispose([request])
+        end-if
+
+    end-try
+
+    return [result]
+
+end-function
+
+// Public: list of trips for a given calendar day. `day` is 'YYYY-MM-DD'.
+// Returns a PB whose ordered items are individual trip objects, each itself a PB.
+function listTrips(day)
+    return script.call('./getJson',
+        formatString('/admin/trips?day={0}&limit=200', page.urlEncode([day]))
+    )
+
+end-function
+
+// Public: full trip detail. Returns a PB with `trip`, `courier`, and `stops`
+// child objects, mirroring the FastAPI shape.
+function tripDetail(tripId)
+    return script.call('./getJson', formatString('/admin/trips/{0}', [tripId]))
+
+end-function
+
+
+// ─────────────────────── Customer portal endpoints ───────────────────────
+// The customer-side endpoints require a bearer token. We call /auth/dev-login
+// with a party_id to get one, then attach it to subsequent /me/* calls.
+
+// Public: list the parties eligible for dev-login (real customers with CO/MD activity)
+function listCustomers()
+    return script.call('./getJson', '/dev/customers?kind=real&sort=recent&limit=60')
+
+end-function
+
+// Public: trade a party_id for a JWT. Returns the full /auth/dev-login response
+// (access_token, customer block, expires_at).
+function customerLogin(partyId)
+    set('url',  'http://localhost:8000/auth/dev-login')
+    set('body', formatString('{{"party_id":{0}}}', [partyId]))
+
+    try
+        set('request', httpRequest.create([url]))
+        httpRequest.setHeader([request], 'content-type', 'application/json')
+        httpRequest.setHeader([request], 'accept',       'application/json')
+        httpRequest.setBody  ([request], [body])
+        httpRequest.post     ([request])
+
+        if ne(httpRequest.responseStatusCode([request]), 200)
+            raise exceptionType.fatal,
+                formatString('Axylog dev-login failed [{0}] {1}',
+                    httpRequest.responseStatusCode([request]),
+                    httpRequest.responseBody([request])
+                )
+
+        end-if
+
+        set('parsed', json.parse(httpRequest.responseBody([request])))
+        set('result', json.json2pb([parsed]))
+
+    finally
+        if inContext('request')
+            httpRequest.dispose([request])
+        end-if
+
+    end-try
+
+    return [result]
+
+end-function
+
+// Internal: GET an authenticated /me/* endpoint with a bearer token.
+function getJsonAuth(path, token)
+    set('url', formatString('http://localhost:8000{0}', [path]))
+
+    try
+        set('request', httpRequest.create([url]))
+        httpRequest.setHeader([request], 'authorization', formatString('Bearer {0}', [token]))
+        httpRequest.setHeader([request], 'accept',        'application/json')
+        httpRequest.get      ([request])
+
+        if or(
+            lt(httpRequest.responseStatusCode([request]), 200),
+            gt(httpRequest.responseStatusCode([request]), 299)
+        )
+            raise exceptionType.fatal,
+                formatString('Axylog /me API error [{0}] {1}: {2}',
+                    httpRequest.responseStatusCode([request]),
+                    [url],
+                    httpRequest.responseBody([request])
+                )
+
+        end-if
+
+        set('body', httpRequest.responseBody([request]))
+        // Same array-wrapping trick as getJson, so /me/visits' top-level array becomes iterable.
+        if startsWith(trim([body]), '[')
+            set('body', formatString('{{"items":{0}}}', [body]))
+        end-if
+        set('parsed', json.parse([body]))
+        set('result', json.json2pb([parsed]))
+
+    finally
+        if inContext('request')
+            httpRequest.dispose([request])
+        end-if
+
+    end-try
+
+    return [result]
+
+end-function
+
+// Public: list of visits attributed to the customer (CO/MD).
+function listVisits(token, days)
+    return script.call('./getJsonAuth',
+        formatString('/me/visits?status=all&days={0}', [days]),
+        [token]
+    )
+
+end-function
+
+// Public: live tracker payload for one visit.
+function visitTracker(token, visitId)
+    return script.call('./getJsonAuth',
+        formatString('/me/visits/{0}/tracker', [visitId]),
+        [token]
+    )
+
+end-function

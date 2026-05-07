@@ -1,0 +1,33 @@
+// Mirror of one Penguin end user — synced from POST /endusers {id:0}.
+// Used by the booking form (dropdown) and to look up id by name/email.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    // Adapter shape: BO attribute names match the legacy `penguin/endUser`
+    // contract (lms_user_id, name, email, phone) but they map to the new
+    // unified account_contact table — locker_user_id is Penguin's id, the
+    // company column is gone (it lives in account_account.name now).
+    <@bo
+        label: 'Penguin end user',
+        table: 'account_contact',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id:            <@bo/attribute label: 'ID',           column: 'id',                dataType: dataType.Long,    length: 18, optional: false()>,
+            account:       <@bo/attribute label: 'Account',      column: 'account',           dataType: dataType.Long,    length: 18, foreignKey: 'account/account'>,
+            lms_user_id:   <@bo/attribute label: 'LMS user id',  column: 'locker_user_id',    dataType: dataType.String,  length: 25>,
+            name:          <@bo/attribute label: 'Name',         column: 'name',              dataType: dataType.String,  length: 200>,
+            email:         <@bo/attribute label: 'Email',        column: 'email',             dataType: dataType.String,  length: 200>,
+            phone:         <@bo/attribute label: 'Phone',        column: 'telephone1',        dataType: dataType.String,  length: 50>,
+            access_code:   <@bo/attribute label: 'Access code',  column: 'locker_access_code',dataType: dataType.Long,    length: 12>,
+            status:        <@bo/attribute label: 'Status',       column: 'status',            dataType: dataType.String,  length: 2>
+        >,
+        attributeGroups: <
+            label: < 'name' >,
+            list:  < 'lms_user_id', 'name', 'email' >
+        >
+    >
+end-resource

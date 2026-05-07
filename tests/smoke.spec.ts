@@ -62,19 +62,33 @@ describe('parser', () => {
 });
 
 describe('Phase 3 — BO registry', () => {
-  it('extracts qr/labelTemplate from app/bo/qr/labelTemplate.cms', () => {
-    const reg = loadApp(join(process.cwd(), 'app'));
-    const bo = reg.bos.get('qr/labelTemplate');
-    expect(bo).toBeDefined();
-    expect(bo!.table).toBe('qr_label_template');
-    expect(bo!.primaryKey).toBe('id');
-    expect(bo!.attributes.has('name')).toBe(true);
-    expect(bo!.attributes.get('width_mm')!.column).toBe('width_mm');
-  });
-  it('also picks up qr/job and qr/code', () => {
-    const reg = loadApp(join(process.cwd(), 'app'));
-    expect(reg.bos.get('qr/job')!.table).toBe('qr_job');
-    expect(reg.bos.get('qr/code')!.table).toBe('qr_code');
+  it('extracts a BO declaration from a parsed resource', async () => {
+    // Self-contained test — no dependency on app/bo/* contents.
+    const cms = await import('cms-vercel');
+    const src = `function main() return script.get('./main') end-function
+      protected resource main
+        <@bo
+          label: 'Demo items',
+          table: 'demo_items',
+          primaryKey: 'id',
+          attributes: <
+            id:    <@bo/attribute label: 'ID',   column: 'id',   dataType: dataType.Long,   length: 9>,
+            name:  <@bo/attribute label: 'Name', column: 'name', dataType: dataType.String, length: 80>
+          >,
+          attributeGroups: <
+            list: < 'name' >
+          >
+        >
+      end-resource`;
+    const parsed = cms.parse(cms.lex(src, 'demo.cms'), 'demo.cms');
+    const main = parsed.resources.find(r => r.name === 'main')!;
+    expect(main).toBeDefined();
+    const info = cms.tryExtractBo('demo/items', main)!;
+    expect(info).toBeDefined();
+    expect(info.table).toBe('demo_items');
+    expect(info.primaryKey).toBe('id');
+    expect(info.attributes.has('name')).toBe(true);
+    expect(info.listGroup).toEqual(['name']);
   });
 });
 

@@ -1,0 +1,451 @@
+// CaseMaster port of `_ingest.py` — fetches a day's worth of visits from
+// Axylog and upserts them via native BOs.
+//
+// Pipeline:
+//   1.  POST /authentication       → bearer token
+//   2.  POST /Deliveries (paginated until empty)
+//   3.  Per record: upsert party (×3) → trip → document → visit
+//
+// Public: runDay(dayIso) returns < day, pages, rows, error >.
+
+// ── HTTP: auth ──────────────────────────────────────────────
+function authenticate(env)
+    set('payload', concat(
+        '{"username":"', pb.get([env], 'AXYLOG_USERNAME'),
+        '","password":"', pb.get([env], 'AXYLOG_PASSWORD'),
+        '"}'
+    ))
+
+    try
+        set('req', httpRequest.create(pb.get([env], 'AUTH_URL')))
+        httpRequest.setHeader([req], 'content-type', 'application/json')
+        httpRequest.setBody  ([req], [payload])
+        httpRequest.post     ([req])
+
+        if ne(httpRequest.responseStatusCode([req]), 200)
+            raise exceptionType.fatal,
+                formatString('Auth failed [{0}] {1}',
+                    httpRequest.responseStatusCode([req]),
+                    httpRequest.responseBody([req])
+                )
+        end-if
+
+        set('parsed', json.parse(httpRequest.responseBody([req])))
+        set('token',  pb.get(json.json2pb([parsed]), 'token'))
+
+    finally
+        if inContext('req')
+            httpRequest.dispose([req])
+        end-if
+    end-try
+
+    return [token]
+
+end-function
+
+// ── HTTP: fetch one page of visits for a day ────────────────
+function fetchPage(env, token, dayIso, pageNumber)
+    set('payload', concat(
+        '{"pagination":{"pageSize":500,"pageNumber":', formatString('{0}', [pageNumber]),
+        '},"filters":{"documentDate_From":"', [dayIso],
+        '","documentDate_To":"', [dayIso], '"}}'
+    ))
+
+    try
+        set('req', httpRequest.create(pb.get([env], 'DELIVERIES_URL')))
+        httpRequest.setHeader([req], 'content-type',     'application/json')
+        httpRequest.setHeader([req], 'authorization',    concat('Bearer ', [token]))
+        httpRequest.setHeader([req], 'ContextOwner',     pb.get([env], 'CONTEXT_OWNER'))
+        httpRequest.setHeader([req], 'Company',          pb.get([env], 'COMPANY'))
+        httpRequest.setHeader([req], 'User',             pb.get([env], 'USER'))
+        httpRequest.setHeader([req], 'SourceDeviceType', pb.get([env], 'SOURCE_DEVICE_TYPE'))
+        httpRequest.setHeader([req], 'LanguageCode',     pb.get([env], 'LANGUAGE_CODE'))
+        httpRequest.setBody  ([req], [payload])
+        httpRequest.post     ([req])
+
+        if ne(httpRequest.responseStatusCode([req]), 200)
+            raise exceptionType.fatal,
+                formatString('Deliveries fetch failed page={0} [{1}] {2}',
+                    [pageNumber],
+                    httpRequest.responseStatusCode([req]),
+                    httpRequest.responseBody([req])
+                )
+        end-if
+
+        set('parsed', json.parse(httpRequest.responseBody([req])))
+        set('result', json.json2pb([parsed]))
+
+    finally
+        if inContext('req')
+            httpRequest.dispose([req])
+        end-if
+    end-try
+
+    return [result]
+
+end-function
+
+
+// ── SQL upserts ──────────────────────────────────────────────
+//
+// Why sql.execute instead of bo.create + bo.persist:
+//   The four BOs below (party / trip / document / visit) all use a Postgres
+//   BIGSERIAL id with NO `sequence:` declaration on the BO. In this CaseMaster
+//   build, bo.create + bo.persist on such a BO silently no-ops for new rows —
+//   updates work, inserts don't (same bug we hit with ingestRun and
+//   planningOverride). The Python ingester used INSERT ... ON CONFLICT
+//   DO UPDATE to side-step this; the CaseMaster sync now does the same via
+//   sql.execute. After the upsert we tryLoad by the natural key to recover
+//   the row's pk — tryLoad reads work fine.
+//
+// SQL injection safety: every string field flows through sqlStr() which
+// escapes embedded single quotes. Numeric / int parameters (ctx, year, code,
+// ids) are inlined directly — they originate as Long from the BO layer or as
+// hardcoded constants from env.cms.
+
+// Quote a string for SQL or emit NULL. Doubles embedded apostrophes.
+// IMPORTANT: don't use this for timestamps — formatString({0}, ts) renders in
+// the runtime locale (DD/MM/YYYY here) which Postgres then mis-parses as MDY.
+// Use sqlDt for any TIMESTAMPTZ column.
+function sqlStr(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return concat("'", replace(formatString('{0}', [v]), "'", "''"), "'")
+end-function
+
+// Inline a numeric or NULL.
+function sqlNum(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return formatString('{0}', [v])
+end-function
+
+// SQL literal for a timestamp. Emits unambiguous ISO 8601 with explicit Z so
+// Postgres parses it as UTC regardless of the server's datestyle. Falls back
+// to sqlStr if the value isn't actually a parseable date (defensive — should
+// not happen for fields known to be timestamps).
+function sqlDt(v)
+    if isNull([v])
+        return 'NULL'
+    end-if
+    return _onError(
+        concat("'", format([v], 'yyyy-MM-dd HH:mm:ss', 'EN'), "'"),
+        script.call('./sqlStr', [v])
+    )
+end-function
+
+
+function upsertParty(ctxOwner, masterCode, companyName, city, country)
+    if isNull([masterCode])
+        return null()
+    end-if
+
+    sql.execute(concat(
+        'INSERT INTO party (context_owner_id, master_data_code, company_name, city, country) VALUES (',
+        [ctxOwner], ', ',
+        script.call('./sqlStr', [masterCode]),  ', ',
+        script.call('./sqlStr', [companyName]), ', ',
+        script.call('./sqlStr', [city]),        ', ',
+        script.call('./sqlStr', [country]),
+        ') ON CONFLICT (context_owner_id, master_data_code) DO UPDATE SET ',
+            'company_name = COALESCE(EXCLUDED.company_name, party.company_name), ',
+            'city         = COALESCE(EXCLUDED.city,         party.city), ',
+            'country      = COALESCE(EXCLUDED.country,      party.country)'
+    ))
+
+    if not(bo.tryLoad('axylog/party',
+                      where: concat('context_owner_id=', [ctxOwner],
+                                    ' & master_data_code="', [masterCode], '"'),
+                      group: 'list',
+                      bo:    'party'))
+        return null()
+    end-if
+    return bo.pk([party])
+end-function
+
+
+function upsertTrip(ctxOwner, tripYear, tripNumber, driverName, plate, departureDt, carrierPartyId)
+    if or(isNull([tripYear]), isNull([tripNumber]))
+        return null()
+    end-if
+
+    sql.execute(concat(
+        'INSERT INTO trip (context_owner_id, trip_year, trip_number, driver_name, tractor_plate, departure_dt, carrier_party_id) VALUES (',
+        [ctxOwner], ', ',
+        [tripYear], ', ',
+        script.call('./sqlStr', [tripNumber]),  ', ',
+        script.call('./sqlStr', [driverName]),  ', ',
+        script.call('./sqlStr', [plate]),       ', ',
+        script.call('./sqlDt',  [departureDt]), ', ',
+        script.call('./sqlNum', [carrierPartyId]),
+        ') ON CONFLICT (context_owner_id, trip_year, trip_number) DO UPDATE SET ',
+            'driver_name      = COALESCE(EXCLUDED.driver_name,      trip.driver_name), ',
+            'tractor_plate    = COALESCE(EXCLUDED.tractor_plate,    trip.tractor_plate), ',
+            'departure_dt     = COALESCE(EXCLUDED.departure_dt,     trip.departure_dt), ',
+            'carrier_party_id = COALESCE(EXCLUDED.carrier_party_id, trip.carrier_party_id)'
+    ))
+
+    if not(bo.tryLoad('axylog/trip',
+                      where: concat('context_owner_id=', [ctxOwner],
+                                    ' & trip_year=', [tripYear],
+                                    ' & trip_number="', [tripNumber], '"'),
+                      group: 'list',
+                      bo:    'trip'))
+        return null()
+    end-if
+    return bo.pk([trip])
+end-function
+
+
+function upsertDocument(ctxOwner, year, code, docDate, docNumber, docType, shipFromId, shipToId)
+    if or(isNull([year]), isNull([code]))
+        return null()
+    end-if
+
+    sql.execute(concat(
+        'INSERT INTO document (context_owner_id, year, code, doc_date, doc_number, doc_type, ship_from_party_id, ship_to_party_id) VALUES (',
+        [ctxOwner], ', ',
+        [year], ', ',
+        [code], ', ',
+        script.call('./sqlDt',  [docDate]),   ', ',
+        script.call('./sqlStr', [docNumber]), ', ',
+        script.call('./sqlStr', [docType]),   ', ',
+        script.call('./sqlNum', [shipFromId]), ', ',
+        script.call('./sqlNum', [shipToId]),
+        ') ON CONFLICT (context_owner_id, year, code) DO UPDATE SET ',
+            'doc_date           = COALESCE(EXCLUDED.doc_date,           document.doc_date), ',
+            'doc_number         = COALESCE(EXCLUDED.doc_number,         document.doc_number), ',
+            'doc_type           = COALESCE(EXCLUDED.doc_type,           document.doc_type), ',
+            'ship_from_party_id = COALESCE(EXCLUDED.ship_from_party_id, document.ship_from_party_id), ',
+            'ship_to_party_id   = COALESCE(EXCLUDED.ship_to_party_id,   document.ship_to_party_id)'
+    ))
+
+    if not(bo.tryLoad('axylog/document',
+                      where: concat('context_owner_id=', [ctxOwner],
+                                    ' & year=', [year],
+                                    ' & code=', [code]),
+                      group: 'list',
+                      bo:    'doc'))
+        return null()
+    end-if
+    return bo.pk([doc])
+end-function
+
+
+function upsertVisit(ctxOwner, documentId, tripId, type, prog, rec)
+    if or(isNull([documentId]), isNull([type]))
+        return null()
+    end-if
+
+    // Pick D/P side fields up front so the SQL is one statement.
+    if eq([type], 'D')
+        set('schedMin', pb.get([rec], 'minScheduledDeliveryTime'))
+        set('schedMax', pb.get([rec], 'maxScheduledDeliveryTime'))
+        set('plannedE', pb.get([rec], 'delivery_PlannedETA'))
+        set('eta',      pb.get([rec], 'delivery_ETA'))
+        set('arrived',  pb.get([rec], 'delivery_ArrivalDateTime'))
+        set('outcome',  pb.get([rec], 'delivery_OutcomeEnum'))
+        set('outcDt',   pb.get([rec], 'delivery_OutcomeDateTime'))
+    else
+        set('schedMin', pb.get([rec], 'minScheduledPickUpTime'))
+        set('schedMax', pb.get([rec], 'maxScheduledPickUpTime'))
+        set('plannedE', pb.get([rec], 'pickUp_PlannedETA'))
+        set('eta',      pb.get([rec], 'pickUp_ETA'))
+        set('arrived',  pb.get([rec], 'pickUp_ArrivalDateTime'))
+        set('outcome',  pb.get([rec], 'pickUp_OutcomeEnum'))
+        set('outcDt',   pb.get([rec], 'pickUp_OutcomeDateTime'))
+    end-if
+
+    // raw_payload is NOT NULL on visit. Serialize the whole Axylog record back
+    // to JSON so the field is available for any future query that needs a
+    // column not yet promoted to its own attribute. Postgres implicitly casts
+    // text -> jsonb on a jsonb column.
+    set('rawJson', json.pb2json([rec], formatted: false()))
+
+    sql.execute(concat(
+        'INSERT INTO visit (',
+            'context_owner_id, document_id, type, prog, trip_id, ',
+            'load_sequence, unload_sequence, ',
+            'scheduled_min_dt, scheduled_max_dt, planned_eta, eta, arrival_dt, ',
+            'outcome, outcome_dt, last_position_latlon, last_position_dt, ',
+            'raw_payload',
+        ') VALUES (',
+            [ctxOwner], ', ',
+            [documentId], ', ',
+            script.call('./sqlStr', [type]), ', ',
+            script.call('./sqlNum', _onError([prog], 1)), ', ',
+            script.call('./sqlNum', [tripId]), ', ',
+            script.call('./sqlNum', pb.get([rec], 'loadSequence')),    ', ',
+            script.call('./sqlNum', pb.get([rec], 'unloadSequence')),  ', ',
+            script.call('./sqlDt',  [schedMin]), ', ',
+            script.call('./sqlDt',  [schedMax]), ', ',
+            script.call('./sqlDt',  [plannedE]), ', ',
+            script.call('./sqlDt',  [eta]),      ', ',
+            script.call('./sqlDt',  [arrived]),  ', ',
+            script.call('./sqlStr', [outcome]),  ', ',
+            script.call('./sqlDt',  [outcDt]),   ', ',
+            script.call('./sqlStr', pb.get([rec], 'lastPositionLatLon')), ', ',
+            script.call('./sqlDt',  pb.get([rec], 'lastPositionDateTime')), ', ',
+            script.call('./sqlStr', [rawJson]),
+        ') ON CONFLICT (context_owner_id, document_id, type) DO UPDATE SET ',
+            'prog                 = EXCLUDED.prog, ',
+            'trip_id              = COALESCE(EXCLUDED.trip_id,              visit.trip_id), ',
+            'load_sequence        = COALESCE(EXCLUDED.load_sequence,        visit.load_sequence), ',
+            'unload_sequence      = COALESCE(EXCLUDED.unload_sequence,      visit.unload_sequence), ',
+            'scheduled_min_dt     = COALESCE(EXCLUDED.scheduled_min_dt,     visit.scheduled_min_dt), ',
+            'scheduled_max_dt     = COALESCE(EXCLUDED.scheduled_max_dt,     visit.scheduled_max_dt), ',
+            'planned_eta          = COALESCE(EXCLUDED.planned_eta,          visit.planned_eta), ',
+            'eta                  = COALESCE(EXCLUDED.eta,                  visit.eta), ',
+            'arrival_dt           = COALESCE(EXCLUDED.arrival_dt,           visit.arrival_dt), ',
+            'outcome              = COALESCE(EXCLUDED.outcome,              visit.outcome), ',
+            'outcome_dt           = COALESCE(EXCLUDED.outcome_dt,           visit.outcome_dt), ',
+            'last_position_latlon = COALESCE(EXCLUDED.last_position_latlon, visit.last_position_latlon), ',
+            'last_position_dt     = COALESCE(EXCLUDED.last_position_dt,     visit.last_position_dt), ',
+            'raw_payload          = EXCLUDED.raw_payload, ',
+            'last_seen_at         = now()'
+    ))
+
+    if not(bo.tryLoad('axylog/visit',
+                      where: concat('context_owner_id=', [ctxOwner],
+                                    ' & document_id=', [documentId],
+                                    ' & type="', [type], '"'),
+                      group: 'list',
+                      bo:    'v'))
+        return null()
+    end-if
+    return bo.pk([v])
+end-function
+
+
+// ── Public: run the day, paginating until empty ─────────────
+function runDay(dayIso)
+    set('env',   script.call('axylog/env:load'))
+
+    // Open a run record so the dispatcher can see what was retrieved later
+    // even after the inline result card scrolls off. We bypass the BO
+    // create-path entirely — the axylog/* BOs (id = Postgres BIGSERIAL,
+    // no `sequence:` declared, no <@bo/attribute/id>) silently no-op on
+    // bo.create + bo.persist, and bo.create + bo.insert sends id=NULL and
+    // trips the NOT NULL constraint. sql.execute works because we control
+    // the SQL. The id is recovered via tryLoad ordered by id DESC right
+    // after — same connection means the row we just inserted is the freshest.
+    sql.execute(
+        formatString(
+            "INSERT INTO ingest_run (started_at, endpoint, filter_from, filter_to, page_size) VALUES (now(), 'POST /Deliveries?v=2', '{0}', '{0}', 500)",
+            [dayIso]
+        )
+    )
+    // finished_at IS NULL is what identifies the just-inserted row — all
+    // previously completed runs have it set. Use this predicate (not orderBy,
+    // which bo.tryLoad doesn't accept).
+    bo.tryLoad('axylog/ingestRun',
+               where: concat('filter_from={"', [dayIso], '"} & finished_at=#null'),
+               group: 'list',
+               bo:    'run')
+    set('runPk', bo.pk([run]))
+
+    try
+        set('token', script.call('./authenticate', [env]))
+
+        set('pageNo',   1)
+        set('totalRows', 0)
+
+        // Loop pages until one comes back smaller than the page size (500).
+        // CaseMaster has no range() function — iterator.ofNumber(start, count, name)
+        // is the equivalent. We don't use the loop variable here because pageNo
+        // is incremented explicitly inside the body, but the form needs *some* name.
+        iterate iterator.ofNumber(1, 50, 'i')
+            set('pageData', script.call('./fetchPage', [env], [token], [dayIso], [pageNo]))
+            set('items',    pb.get([pageData], 'itemList'))
+            if isNull([items])
+                // CaseMaster's loop-break keyword is bare `exit` (NOT exit-iterate);
+                // see runtime/qualifier/page/data/form.cms:167 for the canonical use.
+                exit
+            end-if
+
+            set('rowsThisPage', 0)
+            iterate iterator.ofPB([items], 'rec')
+                set('rowsThisPage', add([rowsThisPage], 1))
+
+                set('shipFromId', script.call('./upsertParty',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    pb.get([rec], 'shipFromMasterDataCode'),
+                    pb.get([rec], 'shipFromCompanyName'),
+                    pb.get([rec], 'shipFromCity'),
+                    pb.get([rec], 'shipFromCountry')
+                ))
+                set('shipToId', script.call('./upsertParty',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    pb.get([rec], 'shipToMasterDataCode'),
+                    pb.get([rec], 'shipToCompanyName'),
+                    pb.get([rec], 'shipToCity'),
+                    pb.get([rec], 'shipToCountry')
+                ))
+                set('carrierId', script.call('./upsertParty',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    pb.get([rec], 'carrierMasterDataCode'),
+                    pb.get([rec], 'carrierCompanyName'),
+                    null(), null()
+                ))
+
+                set('tripPk', script.call('./upsertTrip',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    pb.get([rec], 'tripYear'),
+                    pb.get([rec], 'tripNumber'),
+                    pb.get([rec], 'driverName'),
+                    pb.get([rec], 'tractorPlateNumber'),
+                    pb.get([rec], 'departureDateTime'),
+                    [carrierId]
+                ))
+
+                set('docPk', script.call('./upsertDocument',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    pb.get([rec], 'year'),
+                    pb.get([rec], 'code'),
+                    pb.get([rec], 'docDate'),
+                    pb.get([rec], 'docNumber'),
+                    pb.get([rec], 'docType'),
+                    [shipFromId],
+                    [shipToId]
+                ))
+
+                set('visitPk', script.call('./upsertVisit',
+                    pb.get([env], 'CONTEXT_OWNER'),
+                    [docPk],
+                    [tripPk],
+                    pb.get([rec], 'type'),
+                    pb.get([rec], 'prog'),
+                    [rec]
+                ))
+
+            end-iterate
+
+            set('totalRows', add([totalRows], [rowsThisPage]))
+            // Page came back smaller than the size — drained
+            if lt([rowsThisPage], 500)
+                exit
+            end-if
+            set('pageNo', add([pageNo], 1))
+        end-iterate
+
+    catch exceptionType.fatal
+        // Persist the failure on the run record before bubbling out so the
+        // recent-runs list shows what went wrong. bo.update is the round-trip
+        // companion to the bo.insert above; bo.persist would silently no-op.
+        bo.setAttr([run], 'finished_at', now())
+        bo.setAttr([run], 'error',       error.firstMessage())
+        bo.persist([run])
+        return < day: [dayIso], runId: [runPk], error: error.firstMessage() >
+    end-try
+
+    bo.setAttr([run], 'finished_at',   now())
+    bo.setAttr([run], 'pages_fetched', [pageNo])
+    bo.setAttr([run], 'rows_received', [totalRows])
+    bo.setAttr([run], 'rows_upserted', [totalRows])
+    bo.persist([run])
+
+    return < day: [dayIso], runId: [runPk], pages: [pageNo], rows: [totalRows] >
+
+end-function

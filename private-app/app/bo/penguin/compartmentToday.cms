@@ -1,0 +1,40 @@
+// View — penguin_compartment + the most relevant active reservation (if any)
+// resolved on (station_id, locker_display_name). Used by the grid page so it
+// can render compartments + their current state in a single iterator pass.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Penguin compartment (today)',
+        table: 'penguin_compartment_today',
+        primaryKey: 'compartment_id',
+        deleteRule: deleteRule.NotAllowed,
+        auditable: auditing.None,
+        attributes: <
+            compartment_id:    <@bo/attribute label: 'ID',                column: 'compartment_id',    dataType: dataType.Long,    length: 18, optional: false()>,
+            station_id:        <@bo/attribute label: 'Station',           column: 'station_id',        dataType: dataType.Long,    length: 18>,
+            display_name:      <@bo/attribute label: 'Display name',      column: 'display_name',      dataType: dataType.String,  length: 80>,
+            grid_col:          <@bo/attribute label: 'Col',               column: 'grid_col',          dataType: dataType.Long,    length: 4>,
+            grid_row:          <@bo/attribute label: 'Row',               column: 'grid_row',          dataType: dataType.Long,    length: 4>,
+            cell_span_rows:    <@bo/attribute label: 'Span',              column: 'cell_span_rows',    dataType: dataType.Long,    length: 4>,
+            purpose:           <@bo/attribute label: 'Purpose',           column: 'purpose',           dataType: dataType.String,  length: 30>,
+            size:              <@bo/attribute label: 'Size',              column: 'size',              dataType: dataType.String,  length: 20>,
+            reusable_color:    <@bo/attribute label: 'Reusable color',    column: 'reusable_color',    dataType: dataType.String,  length: 20>,
+            out_of_service:    <@bo/attribute label: 'Out of service',    column: 'out_of_service',    dataType: dataType.Boolean>,
+            order_id:          <@bo/attribute label: 'Order',             column: 'order_id',          dataType: dataType.Long,    length: 18>,
+            lms_order_id:      <@bo/attribute label: 'LMS order id',      column: 'lms_order_id',      dataType: dataType.Long,    length: 12>,
+            order_external_id: <@bo/attribute label: 'External id',       column: 'order_external_id', dataType: dataType.String,  length: 200>,
+            end_user_name:     <@bo/attribute label: 'End user',          column: 'end_user_name',     dataType: dataType.String,  length: 200>,
+            time_begin:        <@bo/attribute label: 'Begin',             column: 'time_begin',        dataType: dataType.Timestamp>,
+            time_end:          <@bo/attribute label: 'End',               column: 'time_end',          dataType: dataType.Timestamp>,
+            unit_status:       <@bo/attribute label: 'Unit status',       column: 'unit_status',       dataType: dataType.String,  length: 20>,
+            effective_status:  <@bo/attribute label: 'Effective status',  column: 'effective_status',  dataType: dataType.String,  length: 30>
+        >,
+        attributeGroups: <
+            label: < 'display_name' >,
+            list:  < 'display_name', 'purpose', 'effective_status', 'end_user_name', 'time_begin', 'time_end' >
+        >
+    >
+end-resource

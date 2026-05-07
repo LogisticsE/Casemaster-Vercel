@@ -1,0 +1,28 @@
+// One row per Penguin sync — written by script/penguin/sync.cms via
+// sql.execute (the BIGSERIAL no-op gotcha applies here too).
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Penguin API run',
+        table: 'penguin_api_run',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id:              <@bo/attribute label: 'ID',           column: 'id',              dataType: dataType.Long,    length: 18, optional: false()>,
+            station_id:      <@bo/attribute label: 'Station',      column: 'locker_station',  dataType: dataType.Long,    length: 18, foreignKey: 'penguin/station'>,
+            started_at:      <@bo/attribute label: 'Started',      column: 'started_at',      dataType: dataType.Timestamp>,
+            finished_at:     <@bo/attribute label: 'Finished',     column: 'finished_at',     dataType: dataType.Timestamp>,
+            orders_received: <@bo/attribute label: 'Orders',       column: 'orders_received', dataType: dataType.Long,    length: 9>,
+            units_received:  <@bo/attribute label: 'Units',        column: 'units_received',  dataType: dataType.Long,    length: 9>,
+            error:           <@bo/attribute label: 'Error',        column: 'error',           dataType: dataType.String,  length: 4000>
+        >,
+        attributeGroups: <
+            label: < 'id' >,
+            list:  < 'id', 'started_at', 'finished_at', 'orders_received', 'units_received', 'error' >
+        >
+    >
+end-resource

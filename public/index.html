@@ -111,15 +111,22 @@ git push -u origin main                   # then connect on vercel.com</code></p
     </div>
     <div class="card">
       <a href="/page/foo/f/ping">DB connectivity</a>
-      <p>Returns <code>ok N</code> after a real Postgres
-         <code>SELECT count(*)</code> through the BO layer.</p>
+      <p>Hits Postgres' <code>information_schema.tables</code> through
+         <code>sql.fetch</code> + an <code>iterate</code> loop.</p>
     </div>
     <div class="card">
-      <a href="/maintenance/qr/labelTemplate">Auto-CRUD page</a>
-      <p>Listing, edit, create, delete — all generated from a
-         <code>&lt;@bo&gt;</code> declaration with zero UI code.</p>
+      <a href="/api?stats=1">Runtime stats</a>
+      <p>JSON probe: registry warmth, function/resource/BO counts,
+         cold-vs-warm-start signal.</p>
     </div>
   </div>
+  <p style="margin-top:0.6rem;color:#64748b;font-size:13px">
+    The auto-CRUD demo (<code>/maintenance/&lt;bo&gt;</code>) needs at
+    least one <code>&lt;@bo&gt;</code> declaration in <code>app/bo/</code>.
+    This deployment ships zero so the demo stays free of project data —
+    drop a single BO file in and the maintenance UI appears with no
+    other code change.
+  </p>
 
   <h2>What's supported</h2>
   <ul>
