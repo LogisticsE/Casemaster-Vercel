@@ -13,38 +13,61 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { loadApp } from '../src/cms/loader.js';
 import { callFunction, Ctx } from '../src/cms/eval.js';
 
-// process.cwd() is unreliable on Vercel (varies between dev / prod / region).
-// Walk from the bundle's own location upward until we find an `app/` directory
-// alongside it. Required because Vercel's includeFiles copies `app/**` to the
-// deploy root, but the function file lives inside `api/`.
+// Find the bundled `app/` directory. On Vercel, `includeFiles: "app/**"`
+// copies the tree to the deploy root (`/var/task/app`). Locally,
+// `process.cwd()` is the project root.
 function findAppDir(): string {
-  if (process.env.CMS_APP_DIR) return process.env.CMS_APP_DIR;
-  const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolve(here, '..', 'app'),
-    resolve(here, '..', '..', 'app'),
-    resolve(process.cwd(), 'app'),
-  ];
+    process.env.CMS_APP_DIR,
+    join(process.cwd(), 'app'),
+    '/var/task/app',
+    join(process.cwd(), '..', 'app'),
+  ].filter(Boolean) as string[];
   for (const c of candidates) if (existsSync(c)) return c;
   return candidates[0]!;
 }
 const APP_DIR = findAppDir();
 
 // Module-scoped registry — parsed once per Vercel function instance and
-// reused for every warm invocation. Phase 11 makes this smarter.
+// reused for every warm invocation. Phase 11 makes this smarter. We catch
+// load errors and surface them in the response so a silent FUNCTION_INVOCATION_FAILED
+// is replaced with a debuggable message.
 let appRegistry: ReturnType<typeof loadApp> | null = null;
+let appRegistryError: Error | null = null;
 function registry() {
-  if (!appRegistry) appRegistry = loadApp(APP_DIR);
-  return appRegistry;
+  if (appRegistry) return appRegistry;
+  try {
+    appRegistry = loadApp(APP_DIR);
+    return appRegistry;
+  } catch (e: any) {
+    appRegistryError = e;
+    throw e;
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Quick health-check without any DB / interpreter involvement. Useful
+  // for diagnosing function-startup failures: if /api?diag=1 returns 200
+  // but /page/foo/f/ping returns 500, the routing or interpreter is to
+  // blame, not the function bundle itself.
+  if (req.url && /[?&]diag=1/.test(req.url)) {
+    res.status(200).setHeader('Content-Type', 'application/json').send(JSON.stringify({
+      ok: true,
+      cwd: process.cwd(),
+      appDir: APP_DIR,
+      appDirExists: existsSync(APP_DIR),
+      hasDbUrl: Boolean(process.env.DATABASE_URL),
+      registryError: appRegistryError ? String(appRegistryError) : null,
+      loadedFns: appRegistry ? [...appRegistry.funcs.keys()] : null,
+    }, null, 2));
+    return;
+  }
+
   try {
     // After Vercel's rewrite, req.url is `/api?_p=/page/foo/f/ping&…`.
     // The original path is forwarded through the `_p` query param (see
