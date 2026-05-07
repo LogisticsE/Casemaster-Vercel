@@ -9,13 +9,17 @@ the same `.cms` files and the same Postgres database concurrently.
 
 ## Status
 
-Phase 1 — proof of concept. `app/page/ping.cms` parses + interprets +
-hits Neon + returns `ok N\n` end-to-end.
+Phases 1–10 landed; see `ROADMAP.md` for granular boxes. Two deployed
+routes prove the loop:
+
+- `/page/foo/f/ping`  — Phase 1, returns `ok N` from the live Neon DB.
+- `/page/foo/f/hello` — Phase 2 + 8, full HTML page styled via
+  `/static/css/app.css`.
 
 ```
 $ npm install
 $ DATABASE_URL=postgresql://… npm test
-✓ 6 tests passed   (5 parser unit + 1 live-DB e2e)
+✓ 13 unit + 1 e2e = 14 tests
 ```
 
 ## Layout
@@ -40,6 +44,34 @@ npm run dev                     # vercel dev — http://localhost:3000
 curl http://localhost:3000/page/foo/f/ping
 # → ok 2
 ```
+
+## Deploy
+
+A push to `main` is the entire deploy. Vercel's Git integration picks up
+each commit, runs the build, and updates the production URL. CI in the
+repo runs in parallel on the same commit (`.github/workflows/ci.yml` for
+GitHub, `bitbucket-pipelines.yml` for Bitbucket) so a failing test is
+visible without waiting for Vercel.
+
+| Command            | What                                              |
+|--------------------|---------------------------------------------------|
+| `npm run dev`      | Vercel dev server (warm-reload on `.cms` edits)   |
+| `npm run typecheck`| `tsc --noEmit` — runs in CI on every push         |
+| `npm test`         | Vitest unit + (gated) live-DB suite               |
+| `npm run deploy`   | One-shot prod deploy (skips git; useful for hotfix) |
+| `npm run deploy:preview` | Per-branch preview without merging          |
+
+### Vercel project settings to know
+
+- **Environment variables** — `DATABASE_URL` (Neon) is the only required
+  one. Set it in *Settings → Environment Variables* (Production +
+  Preview + Development).
+- **Deployment protection** — *Settings → Deployment Protection*. Set to
+  *Disabled* or *"Only Preview Deployments"* for the production URL to
+  be publicly reachable.
+- **Cron schedule** — `vercel.json` declares one cron hitting `/page/foo/f/ping`
+  daily at 06:00 UTC (Hobby-tier-compatible). Pro/Enterprise plans can
+  raise the cadence to `*/4 * * * *` if you want continuous keep-alive.
 
 ## What works in Phase 1
 

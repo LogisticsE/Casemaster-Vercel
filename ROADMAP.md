@@ -137,31 +137,39 @@ The bit you can never skip in production.
 
 CSS, JS, images, fonts.
 
-- [ ] `static/` directory served via Vercel's static-asset support (`public/`)
-- [ ] Bundle bootstrap, font-awesome, the `cmPre.js` / `app.js` chain
-- [ ] Cache-busting query params (`?v=…`)
-- [ ] Per-page `<style>` blocks survive (verified by Phase 2)
+- [x] `public/` directory served by Vercel's static-asset support
+- [x] `/static/:path*` rewrite preserves CaseMaster's URL convention
+- [x] `public/css/app.css` shipped; `hello.cms` consumes it via
+      `<link rel="stylesheet" href="/static/css/app.css?v=…">`
+- [x] Per-page `<style>` blocks still survive (Phase 2 path)
+- [-] Bundling bootstrap / font-awesome / cmPre.js — copy verbatim from
+      the runtime when needed; no work required from this project
 
 ## Phase 9 — Cron / scheduled tasks
 
 The keepalive ping is the smallest example; bigger apps will have more.
 
-- [ ] Detect `@schedule` annotations (or our convention) on `.cms` functions
-- [ ] Generate `vercel.json` `crons:` entries from them
-- [ ] Document the Vercel Cron limits (60 s max, 100 invocations/day on Hobby)
-- [ ] Replace external keepalive script with a `*/4 * * * *` cron hitting `/api/ping`
+- [x] `vercel.json` `crons:` entry hits `/page/foo/f/ping` once daily
+      (Hobby-tier compatible: Pro+ can raise to every 4 min)
+- [x] Documented in README the plan-vs-cadence trade-off
+- [-] `@schedule` annotation parser — defer; the `vercel.json` entry is
+      the same source-of-truth Vercel itself reads
 
 ## Phase 10 — CLI + deploy workflow
 
 The "git push and it works" part.
 
-- [ ] `cmsv dev` — local dev with hot-reload of `.cms` files
-- [ ] `cmsv build` — pre-parse all `.cms` files; emit module map
-- [ ] `cmsv deploy` — passthrough to `vercel deploy`
-- [ ] GitHub Actions workflow (build + Vercel deploy on `main`)
-- [ ] Bitbucket Pipelines workflow (same, alternate VCS)
-- [ ] `.env.example` with `DATABASE_URL` + any other env conventions
-- [ ] README on `git clone … && cmsv dev` for new contributors
+- [x] `npm run dev` — Vercel dev server with hot-reload
+- [x] `npm run typecheck` — `tsc --noEmit`, runs in CI
+- [x] `npm test` — Vitest suite (live-DB skipped without env)
+- [x] `npm run deploy` / `deploy:preview` — Vercel CLI passthroughs
+- [x] `.github/workflows/ci.yml` — type-check + tests on push/PR
+- [x] `bitbucket-pipelines.yml` — same checks for Bitbucket-hosted repos
+- [x] `.env.example` documents `DATABASE_URL` + `CMS_APP_DIR`
+- [x] README "Deploy" section walks through the env-var, deployment
+      protection, and cron-schedule settings on the Vercel dashboard
+- [-] Dedicated `cmsv` CLI binary — npm scripts cover it; ship a real
+      binary later when migration tooling (Phase 12) demands it
 
 ## Phase 11 — Performance
 
