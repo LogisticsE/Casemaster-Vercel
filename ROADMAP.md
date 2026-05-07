@@ -42,7 +42,21 @@ The smallest end-to-end slice. Hits Neon, returns text, deploys.
 - [x] e2e test passes against live Neon (`vitest run` → 6/6)
 - [x] Push to GitHub (`LadFoxTom/Casemaster-Vercel`)
 - [x] Vercel build succeeds (commit `7d93041`)
-- [ ] Set `DATABASE_URL` in Vercel env, redeploy, live URL returns `ok N`
+- [x] Set `DATABASE_URL` in Vercel env
+- [x] Disable Vercel deployment-protection on production
+- [x] Live URL returns `ok N` (commit `0e641be` — `/page/foo/f/ping` → `ok 1`)
+
+### Phase 1 lessons (worth carrying into Phase 2)
+
+- Vercel rewrites need explicit path forwarding via a query param —
+  `req.url` after a rewrite points at the destination, not the source.
+- `[...slug].ts` brackets are a Next.js convention; bare Vercel
+  Functions need `api/index.ts` + a rewrite.
+- `includeFiles` in `vercel.json` is mandatory for any non-imported
+  files (.cms, JSON fixtures, etc.) — they're stripped otherwise.
+- TS `module: ESNext` requires `"type": "module"` in package.json or
+  Vercel's runtime fails at module load (FUNCTION_INVOCATION_FAILED).
+- `import.meta.url` should not be relied on without ESM-mode confirmed.
 
 ## Phase 2 — Page rendering + resolveTemplate
 
