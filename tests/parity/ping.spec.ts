@@ -17,16 +17,31 @@ const VERCEL   = process.env.CMS_VERCEL_URL;
 
 const both = OFFICIAL && VERCEL ? describe : describe.skip;
 
+// Curated URL set kept short on purpose — these are the smoke tests
+// that fail loudest when the runtimes diverge. Add more as we port
+// pages. Each entry maps to the path under each runtime's URL prefix
+// (CaseMaster's `axylog` script vs cms-vercel's `foo` placeholder).
+const URLS = [
+  { official: '/page/axylog/f/ping',  vercel: '/page/foo/f/ping',  match: /^ok \d+\n?$/ },
+];
+
 both('runtime parity', () => {
-  it('ping returns the same payload shape on both runtimes', async () => {
-    const [a, b] = await Promise.all([
-      fetch(`${OFFICIAL}/page/axylog/f/ping`).then(r => r.text()),
-      fetch(`${VERCEL}/page/foo/f/ping`)     .then(r => r.text()),
-    ]);
-    // Both should be `ok N\n`; N can differ because the runtimes might
-    // see different snapshots if a write is in flight, but the shape is
-    // identical.
-    expect(a).toMatch(/^ok \d+\n?$/);
-    expect(b).toMatch(/^ok \d+\n?$/);
+  for (const u of URLS) {
+    it(`${u.official} ↔ ${u.vercel} share payload shape`, async () => {
+      const [a, b] = await Promise.all([
+        fetch(`${OFFICIAL}${u.official}`).then(r => r.text()),
+        fetch(`${VERCEL}${u.vercel}`)    .then(r => r.text()),
+      ]);
+      expect(a).toMatch(u.match);
+      expect(b).toMatch(u.match);
+    });
+  }
+
+  it('maintenance list page renders 200 on cms-vercel', async () => {
+    const r = await fetch(`${VERCEL}/maintenance/qr/labelTemplate`);
+    expect(r.status).toBe(200);
+    const body = await r.text();
+    expect(body).toContain('<table');
+    expect(body).toContain('+ New');
   });
 });

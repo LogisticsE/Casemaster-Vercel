@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { loadApp, AppRegistry } from './loader.js';
 import { callFunction, Ctx } from './eval.js';
 import { newSessionId, persistSession, buildCookie } from './session.js';
+import { handleMaintenance } from './maintenance.js';
 
 export interface CreateHandlerOptions {
   /** Absolute or process.cwd()-relative path to the .cms application. */
@@ -98,6 +99,23 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
       const remainingQs = tmp.searchParams.toString();
       const url = new URL(proxied + (remainingQs ? `?${remainingQs}` : ''), 'http://x');
 
+      const bodyStr0 = typeof req.body === 'string' ? req.body
+                     : (req.body && typeof req.body === 'object') ? JSON.stringify(req.body)
+                     : '';
+      const ct0 = String(req.headers['content-type'] ?? '');
+      const formQuery0: Record<string,string> = {};
+      if (ct0.includes('application/x-www-form-urlencoded') && bodyStr0) {
+        for (const [k, v] of new URLSearchParams(bodyStr0)) formQuery0[k] = v;
+      }
+      const mergedQuery = { ...Object.fromEntries(url.searchParams), ...formQuery0 };
+
+      // Phase 20: auto BO maintenance pages. Returns true if the
+      // request was handled.
+      if (await handleMaintenance(
+        { bos: registry().bos },
+        req, res, url.pathname, mergedQuery, bodyStr0,
+      )) return;
+
       const m = url.pathname.match(/^\/page\/([^/]+)\/f\/([^/]+)$/);
       if (!m) {
         res.status(404).setHeader('Content-Type', 'text/plain')
@@ -112,15 +130,6 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         return;
       }
 
-      const bodyStr = typeof req.body === 'string' ? req.body
-                    : (req.body && typeof req.body === 'object') ? JSON.stringify(req.body)
-                    : '';
-      const ct = String(req.headers['content-type'] ?? '');
-      const formQuery: Record<string,string> = {};
-      if (ct.includes('application/x-www-form-urlencoded') && bodyStr) {
-        for (const [k, v] of new URLSearchParams(bodyStr)) formQuery[k] = v;
-      }
-
       const ctx: Ctx = {
         funcs:     reg.funcs,
         resources: reg.resources,
@@ -128,8 +137,8 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         req: {
           method: req.method ?? 'GET',
           url: url.toString(),
-          query: { ...Object.fromEntries(url.searchParams), ...formQuery },
-          body: bodyStr,
+          query: mergedQuery,
+          body: bodyStr0,
           headers: req.headers as Record<string, string|undefined>,
         },
         res: { contentType: 'text/html', body: '', status: 200, headers: {} },

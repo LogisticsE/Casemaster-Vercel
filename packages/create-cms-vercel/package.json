@@ -1,6 +1,6 @@
 {
   "name": "create-cms-vercel",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Scaffold a new cms-vercel project",

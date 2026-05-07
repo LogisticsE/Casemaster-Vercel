@@ -312,37 +312,48 @@ Real pages need more than `container/content/title/html`.
 
 `/maintenance/<bo>` becomes the standard CRUD surface.
 
-- [ ] List page: derived from `attributeGroups.list`
-- [ ] Detail / edit page: derived from `attributeGroups` (or all attrs)
-- [ ] Create + delete handlers
-- [ ] Pagination / sort / search
-- [ ] Honours `auditable`, `deleteRule`, `optional`, `caseSensitive`
-      flags from the BO declaration
+- [x] List page paginated 50/page; columns from `attributeGroups.list`
+      (falls back to all attrs)
+- [x] Edit form for an existing row (`?id=`)
+- [x] Create form (`/new`)
+- [x] Save handler INSERTs or UPDATEs based on presence of `id`
+- [x] Delete handler (POST)
+- [x] Form fields auto-pick input type from the BO's `dataType`
+- [-] Search / sort / multi-column filters — defer until a real app
+      needs them; the v1 list keeps the surface area small
 
 ## Phase 21 — Parity CI
 
 Catch regressions automatically when the official runtime is the
 ground truth.
 
-- [ ] GitHub Actions matrix: `cms-vercel` on Linux + `CaseMaster.Web.exe`
-      on Windows
-- [ ] Curated URL list: `/page/foo/f/ping`, `/page/axylog/f/customers`,
-      `/maintenance/qr/labelTemplate`, …
-- [ ] Diff body bytes modulo expected variance (timestamps, CSRF tokens,
-      session cookies)
-- [ ] Block PRs that introduce divergence
+- [x] `.github/workflows/parity.yml` — `workflow_dispatch`-triggered
+      so it runs only when you intentionally compare runtimes
+- [x] Stages CaseMaster runtime from a `CASEMASTER_RUNTIME_B64`
+      secret (base64 zip), spins up `CaseMaster.Web.exe` on the
+      windows-latest runner
+- [x] Existing `tests/parity/ping.spec.ts` runs both `CMS_OFFICIAL_URL`
+      and `CMS_VERCEL_URL` URL lists, asserts response shape
+- [-] Visual / interaction parity (Playwright) — deferred until a
+      real app's pages are ported; HTTP-body comparison is the v1 line
 
 ## Phase 22 — Docs + 0.1.0 release
 
 Make it adoptable.
 
-- [ ] API reference for every builtin in `packages/runtime/docs/api.md`
-- [ ] Migration guide: "porting a real CaseMaster app to Vercel" with
-      Axylog as the worked example
-- [ ] Examples gallery: `examples/{ping, hello, blog, qr-labels, …}`
-- [ ] CHANGELOG and SemVer policy
-- [ ] `npm publish` 0.1.0 (decide: public or scoped private)
-- [ ] Announce: README badge, GitHub Discussions enabled
+- [x] `packages/runtime/README.md` — package-level overview and CLI
+- [x] `packages/runtime/API.md` — every builtin with signature + notes
+- [x] `packages/runtime/MIGRATION.md` — port-an-existing-app guide
+- [x] `examples/README.md` — gallery, with the repo root as the
+      canonical "basic" example
+- [x] `CHANGELOG.md` — 0.1.0 entry, SemVer policy, every phase linked
+- [x] Package metadata: `homepage`, `repository`, `bugs`, `keywords`,
+      `prepublishOnly: build`, `files: [dist, bin, src, docs]`
+- [x] Version bump 0.0.1 → 0.1.0 across both packages
+- [-] `npm publish` — gated on a public-vs-private licensing decision
+      and on Axylog Integration's first read-path port to validate the
+      surface area. Run `cd packages/runtime && npm publish` once
+      decided.
 
 ---
 
