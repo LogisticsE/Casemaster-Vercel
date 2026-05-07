@@ -1,13 +1,15 @@
 /**
- * Vercel catch-all route. Maps incoming URLs to .cms functions and runs
- * them through the interpreter.
+ * Single Vercel Function — receives every `/page/...` and `/maintenance/...`
+ * request via the rewrites in vercel.json, parses the URL out of req.url,
+ * resolves it to a .cms function, and runs the interpreter.
  *
  * URL conventions match CaseMaster's:
  *   /page/<script>/f/<function>     → functions in app/page/<script>.cms
  *   /maintenance/<bo>               → BO maintenance (Phase 3)
  *
- * Phase 1: only `/page/axylog/f/<fn>` is wired, and the registry is
- * loaded from `app/page/` (no nested directories yet).
+ * Phase 1: only `/page/.../f/<fn>` is implemented; the registry is loaded
+ * from `app/` recursively. Filenames don't yet matter — function names are
+ * unique across the app — but Phase 4 will key by (script, fn).
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -27,16 +29,28 @@ function registry() {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const url = new URL(req.url ?? '/', 'http://x');
+    // After Vercel's rewrite, req.url is `/api?_p=/page/foo/f/ping&…`.
+    // The original path is forwarded through the `_p` query param (see
+    // vercel.json `rewrites`). We unwrap it here and parse normally.
+    const rawUrl = req.url ?? '/';
+    const tmp = new URL(rawUrl, 'http://x');
+    const proxied = tmp.searchParams.get('_p') ?? rawUrl;
+    tmp.searchParams.delete('_p');
+    // Re-attach the rest of the query string to the original path.
+    const remainingQs = tmp.searchParams.toString();
+    const url = new URL(proxied + (remainingQs ? `?${remainingQs}` : ''), 'http://x');
+
     const m = url.pathname.match(/^\/page\/([^/]+)\/f\/([^/]+)$/);
     if (!m) {
-      res.status(404).send('not found');
+      res.status(404).setHeader('Content-Type', 'text/plain')
+         .send(`no route for ${url.pathname}`);
       return;
     }
     const fnName = m[2]!;
     const reg = registry();
     if (!reg.funcs.has(fnName)) {
-      res.status(404).send(`function not found: ${fnName}`);
+      res.status(404).setHeader('Content-Type', 'text/plain')
+         .send(`function not found: ${fnName} (loaded: ${[...reg.funcs.keys()].join(', ')})`);
       return;
     }
 
@@ -61,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        .setHeader('Content-Type', ctx.res.contentType)
        .send(ctx.res.body);
   } catch (e: any) {
-    // Surface the file:line:col directly so Phase-1 dev iteration is fast.
-    res.status(500).setHeader('Content-Type', 'text/plain').send(`Error: ${e?.message ?? String(e)}`);
+    res.status(500).setHeader('Content-Type', 'text/plain')
+       .send(`Error: ${e?.message ?? String(e)}`);
   }
 }

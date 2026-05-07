@@ -4,7 +4,7 @@
   "buildCommand": "",
   "outputDirectory": ".",
   "rewrites": [
-    { "source": "/page/:path*",        "destination": "/api" },
-    { "source": "/maintenance/:path*", "destination": "/api" }
+    { "source": "/page/:path*",        "destination": "/api?_p=/page/:path*" },
+    { "source": "/maintenance/:path*", "destination": "/api?_p=/maintenance/:path*" }
   ]
 }
