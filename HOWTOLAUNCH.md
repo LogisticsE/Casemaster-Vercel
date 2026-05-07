@@ -107,15 +107,26 @@ npx vercel dev
 > itself`. The repo intentionally has **no** `dev` npm script for this
 > reason — invoke the Vercel CLI directly.
 
-Vercel's local emulator starts on `http://localhost:3000`. Same
-routing, same `.cms` files, same DB connection — only the binding
-differs from production. Edit `.cms` files and refresh; changes pick
-up on the next request.
+The first time you run it, Vercel's CLI runs a one-time wizard:
 
-The first time you run it, `vercel` may ask you to log in and link the
-project. You can skip both prompts (press <kbd>n</kbd>) for purely
-local dev — the link is only needed when deploying or pulling envs
-from a remote Vercel project.
+```
+? Set up and develop "C:\…\my-cms-app"?         →  Y
+? Which scope should contain your project?      →  pick your account
+? Link to existing project?                     →  N  (fresh project)
+? What's your project's name?                   →  press Enter (use the dir name)
+? In which directory is your code located? ./   →  press Enter
+? Want to modify these settings?                →  N  (vercel.json already covers it)
+```
+
+This **creates a Vercel project linked to this directory** (writes
+`.vercel/project.json`, gitignored) and starts the local emulator. It
+does *not* deploy anything — you'll choose a deploy path in step 6.
+
+The emulator binds on `http://localhost:3000` (or 3001/3002/3003 if
+already in use). Same routing, same `.cms` files, same DB connection
+— only the binding differs from production. Edit `.cms` files and
+refresh; changes pick up on the next request. <kbd>Ctrl</kbd>+<kbd>C</kbd>
+to stop.
 
 The default scaffold serves these routes out of the box:
 
@@ -146,33 +157,83 @@ The validator walks every `.cms` file and reports:
 
 Add `--strict` to promote warnings to errors when wiring CI.
 
-## 6. Push to GitHub or Bitbucket
+## 6. Deploy
+
+The Vercel project already exists from step 4 (the wizard linked
+this directory to it). Now you ship code to it. Two paths — pick
+based on whether you want auto-deploy on git push.
+
+### Option A — direct CLI deploy (fastest, no GitHub yet)
 
 ```bash
-git add .
-git commit -m "init my CaseMaster app"
-git remote add origin git@github.com:<you>/<your-repo>.git
-git push -u origin main
+npx vercel --prod
 ```
 
-## 7. Connect Vercel
+Builds locally, uploads, returns a production URL in ~30 seconds.
+**Drawback**: every future deploy is a manual `npx vercel --prod`.
+No auto-deploy on push, no per-branch preview URLs.
 
-1. **vercel.com → Add New → Project → Import** the repo.
-2. **Settings → Environment Variables → Add new**
+Good for confirming everything ships before wiring git.
+
+### Option B — git-connected deploy (the long-term setup)
+
+1. **Create an empty repo** on GitHub or Bitbucket — no README, no
+   `.gitignore`, no license (the local repo already has them).
+
+2. **Push the code** from your local repo:
+   ```bash
+   git add .
+   git commit -m "init my CaseMaster app"
+   git remote add origin https://github.com/<you>/<your-repo>.git
+   git branch -M main
+   git push -u origin main
+   ```
+
+3. **Connect the existing Vercel project** to the GitHub repo:
+   - vercel.com → your project (the one created in step 4) →
+     **Settings → Git → Connect Git Repository**
+   - Pick your GitHub repo → **Connect**
+
+After the connection lands, Vercel triggers an immediate build from
+`main`. Every subsequent `git push origin main` auto-deploys; every
+PR gets its own preview URL.
+
+### Recommended order
+
+Run **Option A** first to confirm your code ships. Then do **Option B**
+once you know the deploy is healthy.
+
+```bash
+# Step 1: smoke-test the deploy
+npx vercel --prod
+# → returns a URL — open it, verify the landing page loads.
+
+# Step 2: wire git for auto-deploy
+# (the steps above)
+```
+
+## 7. Configure the production environment
+
+Once deployed, the live URL needs two manual settings via the Vercel
+dashboard before it's actually usable:
+
+1. **Settings → Environment Variables → Add new**
    - Key: `DATABASE_URL`
    - Value: your Postgres connection string
    - Environments: ✓ Production ✓ Preview ✓ Development
-3. **Settings → Deployment Protection** → set to **Disabled** (or
-   "Only Preview Deployments" if you want previews behind auth).
-   Without this step, every URL returns `401 Authentication Required`.
-4. **Deployments → Redeploy** to apply the env var.
+   - Save, then **Deployments → ⋮ → Redeploy** to apply.
 
-After the first deploy:
+2. **Settings → Deployment Protection** → set Vercel Authentication to
+   **Disabled** (or "Only Preview Deployments" if you want preview URLs
+   behind auth but production public). Without this step, every URL
+   returns `401 Authentication Required`.
+
+After both:
 
 - `https://<your-project>-<your-team>.vercel.app` is your production URL.
 - `https://<your-project>-git-<branch>-<your-team>.vercel.app` is the
-  per-branch preview URL.
-- Every `git push origin main` auto-deploys.
+  per-branch preview URL (if you connected git).
+- Hit `/api?diag=1` to verify `DATABASE_URL` is live.
 
 ## Project layout
 
