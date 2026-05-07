@@ -247,6 +247,14 @@ class Parser {
       case 'LANGAT':    this.i++; head = this.parseQualifier(); break;
       case 'LANG':      head = this.parsePbLiteral(); break;
       case 'IDENT':     head = this.parseIdentOrCall(); break;
+      // `if(cond, then, else)` is also valid as an *expression* in CMS;
+      // treat the keyword as a plain identifier when used in expression
+      // position. The statement form is handled higher up via parseIf().
+      case 'KW_IF': {
+        this.i++;
+        head = { kind: 'Ident', name: 'if', loc: { file: this.file, line: t.line, col: t.col } };
+        break;
+      }
       case 'LPAREN': {
         this.i++;
         const e = this.parseExpr();

@@ -17,6 +17,7 @@ maybe('end-to-end ping', () => {
     const ctx: Ctx = {
       funcs: reg.funcs,
       resources: reg.resources,
+      bos: reg.bos,
       req: { method: 'GET', url: '/page/foo/f/ping', query: {}, body: '' },
       res: { contentType: 'text/html', body: '', status: 200, headers: {} },
     };

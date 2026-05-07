@@ -61,6 +61,111 @@ describe('parser', () => {
   });
 });
 
+describe('Phase 3 — BO registry', () => {
+  it('extracts qr/labelTemplate from app/bo/qr/labelTemplate.cms', () => {
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const bo = reg.bos.get('qr/labelTemplate');
+    expect(bo).toBeDefined();
+    expect(bo!.table).toBe('qr_label_template');
+    expect(bo!.primaryKey).toBe('id');
+    expect(bo!.attributes.has('name')).toBe(true);
+    expect(bo!.attributes.get('width_mm')!.column).toBe('width_mm');
+  });
+  it('also picks up qr/job and qr/code', () => {
+    const reg = loadApp(join(process.cwd(), 'app'));
+    expect(reg.bos.get('qr/job')!.table).toBe('qr_job');
+    expect(reg.bos.get('qr/code')!.table).toBe('qr_code');
+  });
+});
+
+describe('Phase 4 — function calls', () => {
+  it('script.call invokes a same-file function and propagates the return value', async () => {
+    const src = `function entry()
+        return script.call('./helper', 7, 'x')
+    end-function
+    function helper(a, b)
+        return concat([b], '=', formatString('{0}', sum([a], 1)))
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    // Re-parse our snippet on top of the existing registry
+    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
+    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    const result = await callFunction(ctx, 'entry');
+    expect(result).toBe('x=8');
+  });
+});
+
+describe('Phase 5 — standard library', () => {
+  it('today/format/addDay round-trip', async () => {
+    const src = `function entry()
+        set('t', addDay(today(), -1))
+        return format([t], 'yyyy/MM/dd')
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
+    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    const out = String(await callFunction(ctx, 'entry'));
+    // Yesterday in YYYY/MM/DD form
+    expect(out).toMatch(/^\d{4}\/\d{2}\/\d{2}$/);
+  });
+});
+
+describe('Phase 6 — request introspection', () => {
+  it('request.isPOST + qs.getUntrusted reads form-urlencoded body', async () => {
+    const src = `function entry()
+        return concat(
+          if(request.isPOST(), 'POST', 'GET'),
+          ':',
+          qs.getUntrusted('name')
+        )
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
+    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'POST', url:'/x', query:{ name:'Alice' }, body:'name=Alice', headers:{ 'content-type':'application/x-www-form-urlencoded' } },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    expect(await callFunction(ctx, 'entry')).toBe('POST:Alice');
+  });
+});
+
+describe('Phase 7 — auth stub', () => {
+  it('qualifier.call(session/cookie:authenticate) returns true', async () => {
+    const src = `function entry()
+        return qualifier.call('session/cookie:authenticate')
+    end-function`;
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const tokens = (await import('../src/cms/lex.js')).lex(src, 'inline.cms');
+    const parsed = (await import('../src/cms/parse.js')).parse(tokens, 'inline.cms');
+    for (const fn of parsed.funcs) reg.funcs.set(fn.name, fn);
+
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      req: { method:'GET', url:'/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    expect(await callFunction(ctx, 'entry')).toBe(true);
+  });
+});
+
 describe('hello.cms (Phase 2)', () => {
   it('parses + renders to HTML containing the greeting', async () => {
     const reg = loadApp(join(process.cwd(), 'app'));
@@ -71,6 +176,7 @@ describe('hello.cms (Phase 2)', () => {
     const ctx: Ctx = {
       funcs: reg.funcs,
       resources: reg.resources,
+      bos: reg.bos,
       req: { method: 'GET', url: '/page/foo/f/hello', query: {}, body: '' },
       res: { contentType: 'text/html', body: '', status: 200, headers: {} },
     };

@@ -14,6 +14,7 @@ import { query } from './db.js';
 // render.ts is imported lazily inside dispatch() so eval ↔ render don't
 // form a TDZ-time circular import.
 import type { Resource } from './ast.js';
+import type { BOInfo } from './bo.js';
 
 export type Value =
   | string | number | boolean | null
@@ -65,10 +66,13 @@ export interface Ctx {
   funcs:     Map<string, A.Func>;
   // Phase 2: page.get('./name') reads from this map.
   resources: Map<string, Resource>;
+  // Phase 3: BO name → table + columns; iterator.ofEntity uses this.
+  bos:       Map<string, BOInfo>;
   // Mutable response state, drained at the end.
   res: { contentType: string; body: string; status: number; headers: Record<string,string>; redirect?: string };
   // Request inputs.
-  req: { method: string; url: string; query: Record<string,string>; body: string };
+  req: { method: string; url: string; query: Record<string,string>; body: string;
+         headers?: Record<string, string|undefined> };
 }
 
 export class RuntimeError extends Error {
@@ -275,7 +279,7 @@ async function dispatch(
       const orderByCol  = entQ.props.orderBy ? String(entQ.props.orderBy) : '';
       const rowsLimit   = num(named.rows ?? 1000);
 
-      const tbl = entityToTable(entityName);
+      const tbl = entityToTable(ctx, entityName);
       let sql = `SELECT * FROM ${tbl}`;
       if (whereClause) sql += ` WHERE ${compileWhere(whereClause)}`;
       if (orderByCol) {
@@ -346,22 +350,157 @@ async function dispatch(
       return await resolveTemplate(ctx, scope, String(args[0] ?? ''));
     }
 
+    // ─── Phase 4: function calls ────────────────────────────────────
+    case 'script.call': {
+      // `script.call('./fn', a, b)` or `script.call('script/path:fn', …)`
+      const ref = String(args[0] ?? '');
+      const fnName = ref.includes(':') ? ref.split(':')[1]! : ref.replace(/^\.\//, '');
+      const fn = ctx.funcs.get(fnName);
+      if (!fn) throw new RuntimeError(loc, `script.call: function not found: ${ref}`);
+      return await callFunction(ctx, fnName, args.slice(1));
+    }
+    case 'page.call': {
+      // page.call('./fn', a, b) — same dispatch as script.call for now.
+      const ref = String(args[0] ?? '');
+      const fnName = ref.includes(':') ? ref.split(':')[1]! : ref.replace(/^\.\//, '');
+      const fn = ctx.funcs.get(fnName);
+      if (!fn) throw new RuntimeError(loc, `page.call: function not found: ${ref}`);
+      return await callFunction(ctx, fnName, args.slice(1));
+    }
+
+    // ─── Phase 5: standard library ──────────────────────────────────
+    case 'today':       return new Date().toISOString().slice(0, 10);
+    case 'now':         return new Date().toISOString();
+    case 'addDay': {
+      const d = new Date(stringify(args[0] ?? '') || Date.now());
+      d.setUTCDate(d.getUTCDate() + num(args[1]!));
+      return d.toISOString().slice(0, 10);
+    }
+    case 'addMonth': {
+      const d = new Date(stringify(args[0] ?? '') || Date.now());
+      d.setUTCMonth(d.getUTCMonth() + num(args[1]!));
+      return d.toISOString().slice(0, 10);
+    }
+    case 'format': {
+      // format(date, 'yyyy-MM-dd HH:mm', 'EN') — minimal token set covering
+      // patterns used in the existing app. Not a full strftime port.
+      const v = args[0];
+      const fmt = String(args[1] ?? 'yyyy-MM-dd');
+      const d = (v instanceof Date) ? v
+              : v === null || v === undefined ? new Date()
+              : new Date(stringify(v));
+      const Y = d.getUTCFullYear();
+      const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const D = String(d.getUTCDate()).padStart(2, '0');
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      const s = String(d.getUTCSeconds()).padStart(2, '0');
+      return fmt
+        .replace(/yyyy/g, String(Y))
+        .replace(/MM/g, M)
+        .replace(/dd/g, D)
+        .replace(/HH/g, h)
+        .replace(/mm/g, m)
+        .replace(/ss/g, s);
+    }
+    case 'substring': {
+      const s = String(args[0] ?? '');
+      const start = num(args[1] ?? 0);
+      // Two-arg form (start) or three-arg (start, length) — match CMS lite.
+      if (args.length >= 3) return s.substr(start, num(args[2]!));
+      return s.slice(start);
+    }
+    case 'lCase':       return String(args[0] ?? '').toLowerCase();
+    case 'uCase':       return String(args[0] ?? '').toUpperCase();
+    case 'strLength':   return String(args[0] ?? '').length;
+    case 'random':      return Math.floor(Math.random() * 1_000_000_000);
+    case 'toLong':      return Math.trunc(num(args[0]!));
+
+    // ─── Phase 5: JSON + PB ─────────────────────────────────────────
+    case 'json.parse': {
+      try { return JSON.parse(String(args[0] ?? '')) as Value; }
+      catch { return null; }
+    }
+    case 'json.json2pb': {
+      // Our PBs are plain JS objects — json.parse already returned that
+      // shape. json2pb is a no-op identity; kept for source compat.
+      return args[0] ?? null;
+    }
+    case 'json.pb2json': {
+      const formatted = (named.formatted as boolean | undefined) ?? false;
+      return formatted ? JSON.stringify(args[0] ?? null, null, 2) : JSON.stringify(args[0] ?? null);
+    }
+    case 'pb.get': {
+      const obj = args[0] as any;
+      if (obj === null || typeof obj !== 'object') return null;
+      const k = String(args[1] ?? '');
+      return (obj[k] ?? null) as Value;
+    }
+    case 'pb.set': {
+      const obj = args[0] as any;
+      if (obj === null || typeof obj !== 'object') return args[0] ?? null;
+      obj[String(args[1] ?? '')] = args[2] ?? null;
+      return obj;
+    }
+    case 'iterator.ofPB': {
+      // Iterates an array (or object's values) — yielded as Iter for the
+      // `iterate` statement.
+      const src = args[0];
+      const iterName = String(args[1] ?? 'r');
+      const items: Row[] = [];
+      if (Array.isArray(src)) {
+        for (const x of src) items.push({ __kind: 'Row', data: x as any });
+      } else if (src && typeof src === 'object') {
+        for (const x of Object.values(src as object)) items.push({ __kind: 'Row', data: x as any });
+      }
+      return { __kind: 'Iter', iterName, rows: items } as Iter;
+    }
+    case 'iterator.ofToken': {
+      // iterator.ofToken('a,b,c', ',', 'tk') → Iter of strings as rows.
+      const src = String(args[0] ?? '');
+      const sep = String(args[1] ?? ',');
+      const iterName = String(args[2] ?? 'tk');
+      const parts = src.split(sep);
+      return { __kind: 'Iter', iterName,
+        rows: parts.map(p => ({ __kind: 'Row', data: { _value: p } })) } as Iter;
+    }
+
+    // ─── Phase 6: request introspection ─────────────────────────────
+    case 'request.body':         return ctx.req.body ?? '';
+    case 'request.isPOST':       return (ctx.req.method ?? '').toUpperCase() === 'POST';
+    case 'request.isGET':        return (ctx.req.method ?? '').toUpperCase() === 'GET';
+    case 'request.isSameOrigin': {
+      const ref = ctx.req.headers?.referer ?? '';
+      const host = ctx.req.headers?.host ?? '';
+      if (!ref || !host) return false;
+      try { return new URL(ref).host === host; } catch { return false; }
+    }
+    case 'request.url':           return ctx.req.url;
+    case 'qs.getUntrusted':       return ctx.req.query[String(args[0] ?? '')] ?? '';
+    case 'qs.isTrusted':          return false; // CSRF: deferred to Phase 7+
+
+    // ─── Phase 7: auth (stub) ───────────────────────────────────────
+    case 'qualifier.call': {
+      // qualifier.call('session/cookie:authenticate') is the runtime hook
+      // for cookie auth. Phase 7 minimum: always return true. Real
+      // session storage lands in a follow-up.
+      const ref = String(args[0] ?? '');
+      if (ref.endsWith(':authenticate')) return true;
+      return null;
+    }
+
     default:
       throw new RuntimeError(loc, `unimplemented call: ${key}`);
   }
 }
 
-// Map a CaseMaster BO path to its Postgres table. Phase 1 hard-codes the
-// known set; Phase 3 will read real `<@bo>` declarations and build this
-// lookup at module load.
-function entityToTable(entity: string): string {
-  const known: Record<string,string> = {
-    'qr/labelTemplate': 'qr_label_template',
-    'qr/job':           'qr_job',
-    'qr/code':          'qr_code',
-  };
-  if (entity in known) return known[entity]!;
-  // fall back: replace `/` with `_` and camelCase → snake_case.
+// BO path → Postgres table. Phase 3 reads from the BO registry built at
+// load time (`<@bo table: '…'>`); falls back to a snake_case best-guess
+// for entities that haven't been declared yet so dev iteration isn't
+// blocked when a BO file is missing.
+function entityToTable(ctx: Ctx, entity: string): string {
+  const info = ctx.bos.get(entity);
+  if (info) return info.table;
   return entity.replace(/\//g, '_').replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
 }
 

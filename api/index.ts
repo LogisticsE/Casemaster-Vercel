@@ -94,14 +94,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    // Phase 6: form-urlencoded POST bodies get merged into query so
+    // `qs.getUntrusted('field')` works for both GET and POST forms.
+    const bodyStr = typeof req.body === 'string' ? req.body
+                  : (req.body && typeof req.body === 'object') ? JSON.stringify(req.body)
+                  : '';
+    const ct = String(req.headers['content-type'] ?? '');
+    const formQuery: Record<string,string> = {};
+    if (ct.includes('application/x-www-form-urlencoded') && bodyStr) {
+      for (const [k, v] of new URLSearchParams(bodyStr)) formQuery[k] = v;
+    }
+
     const ctx: Ctx = {
       funcs:     reg.funcs,
       resources: reg.resources,
+      bos:       reg.bos,
       req: {
         method: req.method ?? 'GET',
         url: url.toString(),
-        query: Object.fromEntries(url.searchParams),
-        body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? ''),
+        query: { ...Object.fromEntries(url.searchParams), ...formQuery },
+        body: bodyStr,
+        headers: req.headers as Record<string, string|undefined>,
       },
       res: { contentType: 'text/html', body: '', status: 200, headers: {} },
     };

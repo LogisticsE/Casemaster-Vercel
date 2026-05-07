@@ -1,0 +1,40 @@
+// Label dimensions + element placements (mm). The ZPL generator converts
+// to dots at print time using `dpi`.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Label template',
+        table: 'qr_label_template',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id:             <@bo/attribute label: 'ID',                column: 'id',             dataType: dataType.Long,    length: 18, optional: false()>,
+            name:           <@bo/attribute label: 'Name',              column: 'name',           dataType: dataType.String,  length: 150>,
+            width_mm:       <@bo/attribute label: 'Width (mm)',        column: 'width_mm',       dataType: dataType.Decimal, length: 8, precision: 2>,
+            height_mm:      <@bo/attribute label: 'Height (mm)',       column: 'height_mm',      dataType: dataType.Decimal, length: 8, precision: 2>,
+            dpi:            <@bo/attribute label: 'DPI',               column: 'dpi',            dataType: dataType.Long,    length: 4>,
+            qr_size_mm:     <@bo/attribute label: 'QR size (mm)',      column: 'qr_size_mm',     dataType: dataType.Decimal, length: 8, precision: 2>,
+            qr_x_mm:        <@bo/attribute label: 'QR X (mm)',         column: 'qr_x_mm',        dataType: dataType.Decimal, length: 8, precision: 2>,
+            qr_y_mm:        <@bo/attribute label: 'QR Y (mm)',         column: 'qr_y_mm',        dataType: dataType.Decimal, length: 8, precision: 2>,
+            text_x_mm:      <@bo/attribute label: 'Text X (mm)',       column: 'text_x_mm',      dataType: dataType.Decimal, length: 8, precision: 2>,
+            text_y_mm:      <@bo/attribute label: 'Text Y (mm)',       column: 'text_y_mm',      dataType: dataType.Decimal, length: 8, precision: 2>,
+            text_font_dots: <@bo/attribute label: 'Font size (dots)',  column: 'text_font_dots', dataType: dataType.Long,    length: 6>,
+            border:         <@bo/attribute label: 'Border',            column: 'border',         dataType: dataType.Boolean>,
+            barcode_type:   <@bo/attribute label: 'Barcode type',      column: 'barcode_type',   dataType: dataType.String,  length: 20, caseSensitive: true()>,
+            barcode_height_dots: <@bo/attribute label: 'Barcode height (1D, dots)', column: 'barcode_height_dots', dataType: dataType.Long, length: 6>,
+            tags:           <@bo/attribute label: 'Tags',              column: 'tags',           dataType: dataType.String,  length: 200>,
+            sample_payload: <@bo/attribute label: 'Sample payload',    column: 'sample_payload', dataType: dataType.String,  length: 200>,
+            design_json:    <@bo/attribute label: 'Design (JSON)',     column: 'design_json',    dataType: dataType.String,  length: 999999>,
+            bg_color:       <@bo/attribute label: 'Background',        column: 'bg_color',       dataType: dataType.String,  length: 20>,
+            notes:          <@bo/attribute label: 'Notes',             column: 'notes',          dataType: dataType.String,  length: 4000>
+        >,
+        attributeGroups: <
+            label: < 'name' >,
+            list:  < 'name', 'barcode_type', 'width_mm', 'height_mm', 'dpi', 'tags' >
+        >
+    >
+end-resource

@@ -1,0 +1,25 @@
+// One row from the CSV / paste. The QR's payload + an optional human line.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'QR code',
+        table: 'qr_code',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id:           <@bo/attribute label: 'ID',           column: 'id',           dataType: dataType.Long,    length: 18, optional: false()>,
+            job:          <@bo/attribute label: 'Job',          column: 'job',          dataType: dataType.Long,    length: 18, foreignKey: 'qr/job'>,
+            payload:      <@bo/attribute label: 'Payload',      column: 'payload',      dataType: dataType.String,  length: 4000>,
+            display_text: <@bo/attribute label: 'Display text', column: 'display_text', dataType: dataType.String,  length: 4000>,
+            row_index:    <@bo/attribute label: 'Row #',        column: 'row_index',    dataType: dataType.Long,    length: 9>
+        >,
+        attributeGroups: <
+            label: < 'payload' >,
+            list:  < 'row_index', 'payload', 'display_text' >
+        >
+    >
+end-resource
