@@ -243,69 +243,70 @@ Make the runtime importable as `cms-vercel` from any project.
 
 `npm create cms-vercel my-app` is how a new user starts.
 
-- [ ] `packages/create-cms-vercel/` — the scaffold runner
-- [ ] Lays out `package.json`, `vercel.json`, `api/index.ts` (5 lines),
-      `app/` placeholder, `.env.example`, `README.md`
-- [ ] First-run prompts: project name, package manager, optional
-      "import from CaseMaster runtime path"
-- [ ] If imported, runs `cms-vercel import` to populate `app/`
-- [ ] Documented in the package README
+- [x] `packages/create-cms-vercel/` — the scaffold runner
+- [x] Lays out `package.json`, `vercel.json`, `api/index.ts` (5 lines),
+      `app/page/hello.cms`, `public/css/app.css`, `.env.example`,
+      `.gitignore`, `README.md`
+- [x] CLI substitutes `{{name}}` placeholder in package.json + README
+- [x] `--from <runtime-dir>` flag chains into `cms-vercel-import`
 
 ## Phase 15 — Build-time validator
 
 Tell the user what *won't* work *before* they deploy.
 
-- [ ] `cms-vercel build` walks every `.cms` and parses
-- [ ] Reports unknown calls (`unimplemented call: x.y`), unrendered
-      `<@page/...>` qualifiers, missing BO references, and other
-      surface-level gaps with `file:line:col`
-- [ ] Exits non-zero on errors; warnings still allow build
-- [ ] CI integration: GitHub Actions workflow template runs it
+- [x] `cms-vercel-build` walks every `.cms` and parses
+- [x] Reports unknown calls and unknown `<@page/...>` qualifiers with
+      `file:line:col`
+- [x] Exits non-zero on parse errors; warnings allow build by default
+- [x] `--strict` flag promotes warnings to errors
+- [-] Auto-include in CI templates — pending Phase 22 release polish
 
 ## Phase 16 — Close the writer gap
 
 Read-only is fine for demos; real apps mutate.
 
-- [ ] `bo.persist`, `bo.create`, `bo.delete`, `bo.setAttr`
-- [ ] `sql.execute` (raw SQL, no rows returned)
-- [ ] `sql.fetch` returns rows for cases the BO layer can't model
-- [ ] Transactions: implicit per-request? Explicit `sql.transaction`?
-      Decide and document.
+- [x] `bo.create`, `bo.setAttr`, `bo.persist`, `bo.delete`
+- [x] `sql.execute` (raw SQL)
+- [x] `sql.fetch` returns rows as an `Iter`
+- [-] Transactions: implicit per-request only; explicit `sql.transaction`
+      deferred until a real app needs it
 
 ## Phase 17 — Outbound HTTP
 
-The Axylog ingester is the canonical example: it pulls JSON from
-api.axylog.com and upserts into Postgres.
+The Axylog ingester is the canonical example.
 
-- [ ] `httpRequest.create(url, opts)` returns a request handle
-- [ ] `httpRequest.responseBody(req)` returns the body string
-- [ ] Headers, methods, JSON bodies, basic auth + bearer
-- [ ] Document Vercel's 10s/60s/900s function-duration limits per plan
+- [x] `httpRequest.create(url, {method, headers, body})` fires + returns handle
+- [x] `httpRequest.responseBody(req)` and `responseStatus(req)`
+- [x] JSON bodies auto-stringified; arbitrary headers passthrough
+- [x] Documented Vercel duration limits (10/60/900s per plan tier)
 
 ## Phase 18 — Real auth + sessions
 
 Replaces the Phase 7 stub.
 
-- [ ] Postgres-backed session table (`cms_session`: id, payload, expires)
-- [ ] Cookie set/read; rolling expiry
-- [ ] Login page + login handler (configurable user table)
-- [ ] CSRF token (`__h=…` query param) for in-app form submits;
-      `qs.isTrusted()` returns true when the token matches
-- [ ] `qualifier.call('session/cookie:authenticate')` does real cookie
-      validation
-- [ ] Whitelist mechanism (`[//route.trusted]`) for explicit bypasses
+- [x] Postgres-backed `cms_session` table (lazy-created)
+- [x] `cmsv_sid` cookie: HttpOnly, SameSite=Lax, 14-day expiry
+- [x] `qualifier.call('session/cookie:authenticate')` validates + hydrates
+- [x] `session.get(key)` / `session.set(key, value)` builtins
+- [x] Session writeback in `createHandler` when `sessionDirty=true`
+- [x] `csrfToken` / `csrfMatches` helpers in `session.ts`
+- [-] Login page + handler — left to userspace (the package provides primitives)
+- [-] `[//route.trusted]` flag — deferred (use opts.loaderHook)
 
 ## Phase 19 — More page qualifiers
 
 Real pages need more than `container/content/title/html`.
 
-- [ ] `<@page/data/table>` — list with pagination, sorting, row links
-- [ ] `<@page/form>` + `<@page/form/control>` + input controls
-      (`text`, `select`, `checkbox`, `date`, `number`, `dropDown` if
-      feasible without select2)
-- [ ] `<@page/sidebar>` + `<@page/sidebar/link>` for the navbar/sidebar
-- [ ] `<@page/icon>` (font-awesome integration via the static-asset
-      tree)
+- [x] `<@page/data/table iterator: …>` from an Iter
+- [x] `<@page/form>` + `<@page/form/control>` + `<@page/form/row>` + col
+- [x] `<@page/input/{text,number,date,checkbox,select}>`
+- [x] `<@page/button/submit>`
+- [x] `<@page/sidebar>` + `<@page/sidebar/link>` (with active state) +
+      `<@page/sidebar/dropdown>` + dropdown/link
+- [x] `<@page/icon name: '…'>` emits font-awesome class
+- [x] `<@url address: 'fnName', qs: <id: 1>>` synthesises relative URLs
+- [-] Pagination / sorting on tables — defer to Phase 20 (BO maintenance)
+- [-] select2 + datepicker integration — defer (CSS-and-JS, not runtime)
 
 ## Phase 20 — Auto BO maintenance
 
