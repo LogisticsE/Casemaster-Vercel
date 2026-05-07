@@ -8,9 +8,8 @@
   },
   "scripts": {
     "dev": "vercel dev",
-    "build": "tsc --noEmit",
-    "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "pg": "^8.13.0"
