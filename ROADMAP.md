@@ -62,13 +62,20 @@ The smallest end-to-end slice. Hits Neon, returns text, deploys.
 
 Visual pages: list, detail, form. Required to do anything user-visible.
 
-- [ ] `<@page/container>`, `<@page/content>`, `<@page/title>`, `<@page/html>`
-- [ ] `resolveTemplate(\`{{ … }}\`)` substitution with full expression evaluator inside `{{}}`
-- [ ] `protected resource …` definitions and `page.get('./resourceName')`
-- [ ] `page.render(...)` builds final HTML body
-- [ ] Shell layout (sidebar, navbar) — port the framework's chrome OR provide a thin replacement
-- [ ] Static `<style>` + inline `<script>` survive intact
-- [ ] One existing visual page (`qrTemplates`) renders byte-comparable output
+- [x] `<@page/container>`, `<@page/content>`, `<@page/title>`, `<@page/html>`
+- [x] `resolveTemplate(\`{{ … }}\`)` substitution with expression evaluator
+      inside `{{}}` (re-lexes + parseExpression + evalExpr)
+- [x] `protected resource …` definitions and `page.get('./resourceName')`
+- [x] `page.render(...)` writes HTML to the response
+- [x] Qualifier values inside `{{…}}` render recursively (so `{{[main]}}`
+      embeds a page body in a shell)
+- [x] Static `<style>` + inline `<script>` survive intact (passed through
+      via `<@page/html>` positional)
+- [x] First visible page (`hello.cms`) live on Vercel — commit `0624a52`
+- [ ] Port one existing visual page (`qrTemplates`) — gated on Phase 3
+      (BO `<@bo>` declarations, since templates iterate qr_label_template)
+- [ ] Sidebar/navbar shell from the official runtime — gated on Phase 4
+      (script.call, since the shell uses cross-file resource composition)
 
 ## Phase 3 — BO definitions + table mapping
 
