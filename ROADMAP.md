@@ -40,8 +40,9 @@ The smallest end-to-end slice. Hits Neon, returns text, deploys.
 - [x] Vercel catch-all route `api/[...route].ts` resolves URL → `.cms` function and runs it
 - [x] Copy `ping` function to `app/page/ping.cms`
 - [x] e2e test passes against live Neon (`vitest run` → 6/6)
-- [ ] `vercel dev` end-to-end (manual; needs `vercel login` first)
-- [ ] Push to GitHub, Vercel deploy succeeds, live URL returns `ok N`
+- [x] Push to GitHub (`LadFoxTom/Casemaster-Vercel`)
+- [x] Vercel build succeeds (commit `7d93041`)
+- [ ] Set `DATABASE_URL` in Vercel env, redeploy, live URL returns `ok N`
 
 ## Phase 2 — Page rendering + resolveTemplate
 
