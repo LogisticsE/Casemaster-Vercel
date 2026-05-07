@@ -1,0 +1,85 @@
+// Maps to ingest_run — one row per Axylog data pull. The native sync.cms
+// inserts a row on start, updates it on completion (or with the error).
+// The /f/sync page reads this BO to render the recent-runs list.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Ingest run',
+        table: 'ingest_run',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id: <@bo/attribute
+                label: 'ID',
+                column: 'id',
+                dataType: dataType.Long,
+                length: 18,
+                optional: false()
+            >,
+            started_at: <@bo/attribute
+                label: 'Started',
+                column: 'started_at',
+                dataType: dataType.Timestamp
+            >,
+            finished_at: <@bo/attribute
+                label: 'Finished',
+                column: 'finished_at',
+                dataType: dataType.Timestamp
+            >,
+            endpoint: <@bo/attribute
+                label: 'Endpoint',
+                column: 'endpoint',
+                dataType: dataType.String,
+                length: 200
+            >,
+            filter_from: <@bo/attribute
+                label: 'From',
+                column: 'filter_from',
+                dataType: dataType.Date
+            >,
+            filter_to: <@bo/attribute
+                label: 'To',
+                column: 'filter_to',
+                dataType: dataType.Date
+            >,
+            page_size: <@bo/attribute
+                label: 'Page size',
+                column: 'page_size',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            pages_fetched: <@bo/attribute
+                label: 'Pages',
+                column: 'pages_fetched',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            rows_received: <@bo/attribute
+                label: 'Rows',
+                column: 'rows_received',
+                dataType: dataType.Long,
+                length: 9
+            >,
+            rows_upserted: <@bo/attribute
+                label: 'Upserted',
+                column: 'rows_upserted',
+                dataType: dataType.Long,
+                length: 9
+            >,
+            error: <@bo/attribute
+                label: 'Error',
+                column: 'error',
+                dataType: dataType.String,
+                length: 4000
+            >
+        >,
+        attributeGroups: <
+            label: < 'id' >,
+            list:  < 'id', 'filter_from', 'started_at', 'finished_at', 'pages_fetched', 'rows_received', 'error' >
+        >
+    >
+end-resource

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cms-vercel — live demo</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    .container { max-width: 800px; }
+    h2 { margin-top: 1.8rem; font-size: 1.1rem; color: #475569; font-weight: 600; }
+    ul { padding-left: 1.2rem; line-height: 1.8; }
+    code { background: #eef2f6; padding: 1px 6px; border-radius: 3px; font-size: 13px; }
+    .meta { color: #94a3b8; font-size: 13px; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>cms-vercel — live demo</h1>
+  <p>This deployment is the canonical example of running a CaseMaster
+     <code>.cms</code> application on Vercel via the
+     <a href="https://github.com/LadFoxTom/Casemaster-Vercel">cms-vercel</a>
+     runtime. Every link below is generated from real <code>.cms</code>
+     files in the repo's <code>app/</code> directory, served by a single
+     5-line Vercel Function.</p>
+
+  <h2>Demo pages</h2>
+  <ul>
+    <li><a href="/page/foo/f/hello">/page/foo/f/hello</a> — full HTML page with template substitution</li>
+    <li><a href="/page/foo/f/ping">/page/foo/f/ping</a> — DB connectivity check, returns <code>ok N</code></li>
+  </ul>
+
+  <h2>Auto-generated CRUD (no UI code, just BO declarations)</h2>
+  <ul>
+    <li><a href="/maintenance/qr/labelTemplate">/maintenance/qr/labelTemplate</a> — QR label templates</li>
+    <li><a href="/maintenance/qr/job">/maintenance/qr/job</a> — QR jobs</li>
+    <li><a href="/maintenance/qr/code">/maintenance/qr/code</a> — QR codes</li>
+    <li><a href="/maintenance/axylog/trip">/maintenance/axylog/trip</a> — Axylog trips</li>
+    <li><a href="/maintenance/axylog/document">/maintenance/axylog/document</a> — Axylog documents</li>
+    <li><a href="/maintenance/axylog/party">/maintenance/axylog/party</a> — Axylog parties</li>
+    <li><a href="/maintenance/axylog/visit">/maintenance/axylog/visit</a> — Axylog visits</li>
+    <li><a href="/maintenance/axylog/customerVisit">/maintenance/axylog/customerVisit</a> — customer visit view</li>
+    <li><a href="/maintenance/axylog/tripSummary">/maintenance/axylog/tripSummary</a> — trip summary view</li>
+    <li><a href="/maintenance/axylog/ingestRun">/maintenance/axylog/ingestRun</a> — ingest run history</li>
+    <li><a href="/maintenance/axylog/contextOwner">/maintenance/axylog/contextOwner</a> — context owners (multi-tenancy)</li>
+  </ul>
+
+  <h2>Diagnostic endpoints</h2>
+  <ul>
+    <li><a href="/api?diag=1">/api?diag=1</a> — registry health, app dir, env presence</li>
+    <li><a href="/api?stats=1">/api?stats=1</a> — function counts + warm-instance status</li>
+    <li><a href="/static/css/app.css">/static/css/app.css</a> — static asset (theming)</li>
+  </ul>
+
+  <p class="meta">
+    Source: <a href="https://github.com/LadFoxTom/Casemaster-Vercel">github.com/LadFoxTom/Casemaster-Vercel</a> ·
+    Built with <code>cms-vercel</code> 0.1.0
+  </p>
+</div>
+</body>
+</html>

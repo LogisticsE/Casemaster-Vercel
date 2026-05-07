@@ -2,33 +2,40 @@
 
 ## In one sentence
 
-An npm package (`cms-vercel`) plus a `npm create cms-vercel` scaffold
-that lets any CaseMaster `.cms` application deploy to Vercel as
-serverless functions — no long-running .NET host, no Windows-only
-binaries, no `CaseMaster.Web.exe`.
+A self-contained GitHub repository (`LadFoxTom/Casemaster-Vercel`) that
+lets any CaseMaster `.cms` application deploy to Vercel as serverless
+functions — no long-running .NET host, no Windows-only binaries, no
+`CaseMaster.Web.exe`.
 
 ## In one minute
 
 CaseMaster ships a closed-source .NET runtime that interprets `.cms`
 script files at request time. That binary needs a long-running Windows
 host, which excludes Vercel and most modern serverless platforms. This
-project re-implements *only* the surface area an app actually depends on
-— page routing, BO definitions, iterators, expressions, the standard
-library — in TypeScript, shipped as a reusable npm package. Same
-`.cms` files, same Postgres, same URLs.
+project re-implements *only* the surface area an app actually depends
+on — page routing, BO definitions, iterators, expressions, the standard
+library — in TypeScript, packaged as a reusable runtime + scaffold
+template. Same `.cms` files, same Postgres, same URLs.
 
-## How a user adopts it
+## How a user adopts it (Path A — internal / pre-publish)
 
 ```bash
-npm create cms-vercel my-app
+git clone https://github.com/LadFoxTom/Casemaster-Vercel my-app
 cd my-app
-npx cms-vercel import --from /path/to/casemaster-runtime  # optional
-git push origin main          # Vercel auto-deploys
+rm -rf .git                                       # break ties to upstream
+git init && git remote add origin <your-repo>    # become your repo
+npm install
+node packages/runtime/bin/import.mjs --from /path/to/casemaster-runtime
+npm run dev                                       # http://localhost:3000
+git push -u origin main                           # Vercel auto-deploys
 ```
 
-That's the contract. The user owns `app/**.cms`, `vercel.json`, and
-their `.env`; the runtime lives in `node_modules/cms-vercel` and is
-upgraded with `npm update`.
+The user owns `app/**.cms`, `vercel.json`, `.env`; the runtime lives
+inside the cloned tree under `packages/runtime/` and gets upgraded by
+`git pull upstream main` (after wiring `upstream` once). When the
+project hits npm publish (Path B / Path C — see ROADMAP), the install
+flow shrinks to `npm create cms-vercel my-app` and the runtime moves
+to `node_modules`.
 
 ## Architecture
 

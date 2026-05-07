@@ -1,0 +1,107 @@
+// Document — the (year, code) shipment paperwork. Holds the cross-leg
+// shared data: ship_from / ship_to / shipper / warehouse references,
+// quantities, weights, payment.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Document',
+        table: 'document',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id: <@bo/attribute
+                label: 'ID',
+                column: 'id',
+                dataType: dataType.Long,
+                length: 18,
+                optional: false()
+            >,
+            context_owner_id: <@bo/attribute
+                label: 'Context owner',
+                column: 'context_owner_id',
+                dataType: dataType.Long,
+                length: 9,
+                foreignKey: 'axylog/contextOwner'
+            >,
+            year: <@bo/attribute
+                label: 'Year',
+                column: 'year',
+                dataType: dataType.Long,
+                length: 4,
+                optional: false()
+            >,
+            code: <@bo/attribute
+                label: 'Code',
+                column: 'code',
+                dataType: dataType.Long,
+                length: 9,
+                optional: false()
+            >,
+            doc_date: <@bo/attribute
+                label: 'Doc date',
+                column: 'doc_date',
+                dataType: dataType.Timestamp
+            >,
+            doc_number: <@bo/attribute
+                label: 'Doc #',
+                column: 'doc_number',
+                dataType: dataType.String,
+                length: 80
+            >,
+            doc_series: <@bo/attribute
+                label: 'Series',
+                column: 'doc_series',
+                dataType: dataType.String,
+                length: 40
+            >,
+            doc_type: <@bo/attribute
+                label: 'Type',
+                column: 'doc_type',
+                dataType: dataType.String,
+                length: 40
+            >,
+            order_number_ref: <@bo/attribute
+                label: 'Order ref',
+                column: 'order_number_ref',
+                dataType: dataType.String,
+                length: 100
+            >,
+            ship_from_party_id: <@bo/attribute
+                label: 'Ship from',
+                column: 'ship_from_party_id',
+                dataType: dataType.Long,
+                length: 18,
+                foreignKey: 'axylog/party'
+            >,
+            ship_to_party_id: <@bo/attribute
+                label: 'Ship to',
+                column: 'ship_to_party_id',
+                dataType: dataType.Long,
+                length: 18,
+                foreignKey: 'axylog/party'
+            >,
+            total_weight_kg: <@bo/attribute
+                label: 'Weight (kg)',
+                column: 'total_weight_kg',
+                dataType: dataType.Decimal,
+                length: 12,
+                precision: 3
+            >,
+            volume_m3: <@bo/attribute
+                label: 'Volume (m³)',
+                column: 'volume_m3',
+                dataType: dataType.Decimal,
+                length: 12,
+                precision: 3
+            >
+        >,
+        attributeGroups: <
+            label: < 'doc_number' >,
+            list:  < 'id', 'doc_number', 'year', 'code', 'doc_date' >
+        >
+    >
+end-resource

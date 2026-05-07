@@ -1,0 +1,140 @@
+// Maps to the existing `trip_summary` Postgres view (defined in schema.sql).
+// One row per trip with all the rollups the dispatcher list needs:
+//   total_visits / deliveries / pickups / visits_completed / first_scheduled_dt
+//   / last_outcome_dt / total_distance_km / driver_name / plate_number / carrier_name.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Trip summary',
+        table: 'trip_summary',
+        primaryKey: 'trip_pk',
+        deleteRule: deleteRule.NotAllowed,
+        auditable: auditing.None,
+        attributes: <
+            trip_pk: <@bo/attribute
+                label: 'Trip ID',
+                column: 'trip_pk',
+                dataType: dataType.Long,
+                length: 18,
+                optional: false()
+            >,
+            context_owner_id: <@bo/attribute
+                label: 'Context owner',
+                column: 'context_owner_id',
+                dataType: dataType.Long,
+                length: 9
+            >,
+            trip_year: <@bo/attribute
+                label: 'Year',
+                column: 'trip_year',
+                dataType: dataType.Long,
+                length: 4
+            >,
+            trip_number: <@bo/attribute
+                label: 'Trip #',
+                column: 'trip_number',
+                dataType: dataType.String,
+                length: 40
+            >,
+            driver_name: <@bo/attribute
+                label: 'Driver',
+                column: 'driver_name',
+                dataType: dataType.String,
+                length: 120
+            >,
+            plate_number: <@bo/attribute
+                label: 'Plate',
+                column: 'plate_number',
+                dataType: dataType.String,
+                length: 40
+            >,
+            carrier_name: <@bo/attribute
+                label: 'Carrier',
+                column: 'carrier_name',
+                dataType: dataType.String,
+                length: 200
+            >,
+            departure_dt: <@bo/attribute
+                label: 'Departed',
+                column: 'departure_dt',
+                dataType: dataType.Timestamp
+            >,
+            total_visits: <@bo/attribute
+                label: 'Stops',
+                column: 'total_visits',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            deliveries: <@bo/attribute
+                label: 'D',
+                column: 'deliveries',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            pickups: <@bo/attribute
+                label: 'P',
+                column: 'pickups',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            visits_completed: <@bo/attribute
+                label: 'Done',
+                column: 'visits_completed',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            visits_positive: <@bo/attribute
+                label: 'Positive',
+                column: 'visits_positive',
+                dataType: dataType.Long,
+                length: 6
+            >,
+            first_scheduled_dt: <@bo/attribute
+                label: 'First scheduled',
+                column: 'first_scheduled_dt',
+                dataType: dataType.Timestamp
+            >,
+            last_scheduled_dt: <@bo/attribute
+                label: 'Last scheduled',
+                column: 'last_scheduled_dt',
+                dataType: dataType.Timestamp
+            >,
+            last_outcome_dt: <@bo/attribute
+                label: 'Last outcome',
+                column: 'last_outcome_dt',
+                dataType: dataType.Timestamp
+            >,
+            total_distance_km: <@bo/attribute
+                label: 'Total km',
+                column: 'total_distance_km',
+                dataType: dataType.Decimal,
+                length: 12,
+                precision: 1
+            >,
+            // Rolled up from visit_in_trip in the view. One of:
+            // active / completed / not_started / no_longer_active.
+            trip_status: <@bo/attribute
+                label: 'Status',
+                column: 'trip_status',
+                dataType: dataType.String,
+                length: 30
+            >
+        >,
+        attributeGroups: <
+            label: < 'trip_number' >,
+            list:  <
+                'trip_number',
+                'driver_name',
+                'plate_number',
+                'trip_status',
+                'visits_completed',
+                'total_visits',
+                'departure_dt',
+                'last_outcome_dt'
+            >
+        >
+    >
+end-resource

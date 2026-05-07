@@ -1,0 +1,39 @@
+// Multi-tenant scope. One row per Axylog ContextOwner header value.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Context Owner',
+        table: 'context_owner',
+        primaryKey: 'id',
+        deleteRule: deleteRule.NotAllowed,
+        auditable: auditing.None,
+        attributes: <
+            id: <@bo/attribute
+                label: 'ID',
+                column: 'id',
+                dataType: dataType.Long,
+                length: 9,
+                optional: false()
+            >,
+            vat_number: <@bo/attribute
+                label: 'VAT number',
+                column: 'vat_number',
+                dataType: dataType.String,
+                length: 50
+            >,
+            display_name: <@bo/attribute
+                label: 'Name',
+                column: 'display_name',
+                dataType: dataType.String,
+                length: 200
+            >
+        >,
+        attributeGroups: <
+            label: < 'display_name' >,
+            list:  < 'id', 'display_name', 'vat_number' >
+        >
+    >
+end-resource

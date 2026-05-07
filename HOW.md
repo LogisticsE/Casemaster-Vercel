@@ -74,6 +74,22 @@ export default createHandler({
 That ~5 lines lives in any consumer's `api/index.ts`. Everything else
 they own is content (.cms, vercel.json).
 
+## Distribution model (current — Path A)
+
+We **don't publish to npm yet** (see ROADMAP for the rationale —
+licensing decision pending CaseMaster vendor sign-off). Instead, the
+runtime ships as part of the repo itself. Adopters either:
+
+1. **Clone the whole repo** and edit `app/` to be their CaseMaster
+   project. This is the path described in `WHAT.md` and `HOWTOLAUNCH.md`.
+2. **Fork it** and pull updates from `upstream/main` whenever the
+   runtime gets new features.
+
+When/if we publish to npm (Path B), the package extraction work in
+Phase 13 means the layout is already correct — `packages/runtime/`
+becomes the npm artefact, the example app at the repo root becomes
+the canonical example. No code reorganisation needed.
+
 ## Parser strategy
 
 A hand-rolled lexer + Pratt parser. PEG generators (`peggy`,

@@ -350,10 +350,31 @@ Make it adoptable.
 - [x] Package metadata: `homepage`, `repository`, `bugs`, `keywords`,
       `prepublishOnly: build`, `files: [dist, bin, src, docs]`
 - [x] Version bump 0.0.1 → 0.1.0 across both packages
-- [-] `npm publish` — gated on a public-vs-private licensing decision
-      and on Axylog Integration's first read-path port to validate the
-      surface area. Run `cd packages/runtime && npm publish` once
-      decided.
+- [x] `HOWTOLAUNCH.md` — quickstart for the GitHub-clone install path
+- [-] `npm publish` — **deliberately deferred** pending CaseMaster
+      2.0 vendor (9 Knots) sign-off on whether we can distribute a
+      reimplementation of their runtime publicly. Until then we use
+      Path A: clone-the-repo distribution. The publish command stays
+      one line away (`cd packages/runtime && npm publish`).
+
+---
+
+## Distribution paths (decision tree)
+
+```
+Will external developers use this?
+├─ no, internal only
+│  └─ Path A: GitHub-clone distribution (current)
+└─ yes
+   ├─ free, open source
+   │  └─ Path B: public npm + MIT license
+   └─ paid product
+      └─ Path C: scoped private npm + proprietary license
+```
+
+The runtime is **structurally publish-ready** — Path B/C are one-line
+commands away. We're on Path A because the licensing decision needs
+9 Knots' input.
 
 ---
 

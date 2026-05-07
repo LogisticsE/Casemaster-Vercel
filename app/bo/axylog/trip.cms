@@ -1,0 +1,114 @@
+// Trip header — all driver / plate / vehicle data shared across the trip's legs.
+function main()
+    return script.get('./main')
+end-function
+
+resource main
+    <@bo
+        label: 'Trip',
+        table: 'trip',
+        primaryKey: 'id',
+        deleteRule: deleteRule.Allowed,
+        auditable: auditing.None,
+        attributes: <
+            id: <@bo/attribute
+                label: 'ID',
+                column: 'id',
+                dataType: dataType.Long,
+                length: 18,
+                optional: false()
+            >,
+            context_owner_id: <@bo/attribute
+                label: 'Context owner',
+                column: 'context_owner_id',
+                dataType: dataType.Long,
+                length: 9,
+                foreignKey: 'axylog/contextOwner'
+            >,
+            trip_year: <@bo/attribute
+                label: 'Year',
+                column: 'trip_year',
+                dataType: dataType.Long,
+                length: 4,
+                optional: false()
+            >,
+            trip_number: <@bo/attribute
+                label: 'Trip #',
+                column: 'trip_number',
+                dataType: dataType.String,
+                length: 40,
+                optional: false()
+            >,
+            carrier_party_id: <@bo/attribute
+                label: 'Carrier',
+                column: 'carrier_party_id',
+                dataType: dataType.Long,
+                length: 18,
+                foreignKey: 'axylog/party'
+            >,
+            departure_dt: <@bo/attribute
+                label: 'Departed',
+                column: 'departure_dt',
+                dataType: dataType.Timestamp
+            >,
+            planned_departure_dt: <@bo/attribute
+                label: 'Planned departure',
+                column: 'planned_departure_dt',
+                dataType: dataType.Timestamp
+            >,
+            driver_id: <@bo/attribute
+                label: 'Driver ID',
+                column: 'driver_id',
+                dataType: dataType.Decimal,
+                length: 12,
+                precision: 0
+            >,
+            driver_name: <@bo/attribute
+                label: 'Driver',
+                column: 'driver_name',
+                dataType: dataType.String,
+                length: 120
+            >,
+            driver_phone: <@bo/attribute
+                label: 'Driver phone',
+                column: 'driver_phone',
+                dataType: dataType.String,
+                length: 30
+            >,
+            plate_number: <@bo/attribute
+                label: 'Plate',
+                column: 'plate_number',
+                dataType: dataType.String,
+                length: 40
+            >,
+            tractor_plate: <@bo/attribute
+                label: 'Tractor plate',
+                column: 'tractor_plate',
+                dataType: dataType.String,
+                length: 40
+            >,
+            trailer_plate: <@bo/attribute
+                label: 'Trailer plate',
+                column: 'trailer_plate',
+                dataType: dataType.String,
+                length: 40
+            >,
+            vehicle_code: <@bo/attribute
+                label: 'Vehicle code',
+                column: 'vehicle_code',
+                dataType: dataType.String,
+                length: 40
+            >,
+            vehicle_description: <@bo/attribute
+                label: 'Vehicle description',
+                column: 'vehicle_description',
+                dataType: dataType.String,
+                length: 200
+            >
+        >,
+        attributeGroups: <
+            label: < 'trip_number' >,
+            list:  < 'id', 'trip_year', 'trip_number', 'driver_name', 'plate_number', 'tractor_plate', 'departure_dt' >
+        >
+    >
+end-resource
