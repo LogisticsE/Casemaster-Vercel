@@ -224,18 +224,20 @@ project can deploy to Vercel without forking this repo.
 
 Make the runtime importable as `cms-vercel` from any project.
 
-- [ ] npm workspace at the repo root (`packages/*` + the example app)
-- [ ] `packages/runtime/` ships the lexer / parser / interpreter /
+- [x] npm workspace at the repo root (`packages/*` + the example app)
+- [x] `packages/runtime/` ships the lexer / parser / interpreter /
       renderer / BO registry / Postgres pool
-- [ ] Public API: `createHandler({ appDir })` returns a Vercel-compatible
+- [x] Public API: `createHandler({ appDir })` returns a Vercel-compatible
       function. Plus typed exports for advanced consumers (`Ctx`,
       `Value`, `loadApp`, `callFunction`)
-- [ ] `packages/runtime/dist/` published to npm (private scope or public —
-      decide before the 0.1.0 cut)
-- [ ] The existing live deploy keeps working post-refactor (no URL
-      regressions; Vercel project root re-pointed if needed)
-- [ ] `tools/bench.mjs` and `tools/import.mjs` move into the package's
-      `bin/` so they're available as `npx cms-vercel <cmd>` once published
+- [x] The existing live deploy survived the refactor — both URLs and
+      the diag/stats probes still respond
+- [x] `tools/bench.mjs` and `tools/import.mjs` moved into the package's
+      `bin/` directory; declared in `package.json` `bin:` so they're
+      available as `npx cms-vercel-bench` / `npx cms-vercel-import`
+      once published
+- [-] `packages/runtime/dist/` and `npm publish` — gated on Phase 22
+      release decision (private scope or public)
 
 ## Phase 14 — Scaffold tool
 
