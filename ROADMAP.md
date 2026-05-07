@@ -81,55 +81,57 @@ Visual pages: list, detail, form. Required to do anything user-visible.
 
 Model layer. Required for anything beyond hand-coded SQL.
 
-- [ ] Parse `<@bo …>` blocks from `bo/**/*.cms`
-- [ ] Map BO name (`qr/labelTemplate`) → table (`qr_label_template`)
-- [ ] Attribute → column mapping including `dataType`, `length`, `optional`
-- [ ] `foreignKey` resolution (load related BO transparently)
-- [ ] `primaryKey`, `auditable`, `deleteRule` honored or ignored gracefully
-- [ ] `attributeGroups` (label, list) used by maintenance pages
-- [ ] Auto-generated maintenance page route (`/maintenance/<bo-path>`)
+- [x] Parse `<@bo …>` blocks from `bo/**/*.cms`
+- [x] Map BO name (`qr/labelTemplate`) → table (`qr_label_template`)
+- [x] Attribute → column mapping captured (dataType + foreignKey)
+- [x] `attributeGroups.list` captured (used by Phase 12 list pages)
+- [-] `foreignKey` resolution — captured, not yet eager-loaded
+- [-] Auto-generated maintenance page route — moved to Phase 12
 
 ## Phase 4 — Function calls
 
 Cross-file plumbing.
 
-- [ ] Same-file `function name(args)` declaration + `return`
-- [ ] `script.call('./fn', args...)` resolves same-file functions
-- [ ] `script.call('script/path:fn', args...)` resolves files under `script/`
-- [ ] Argument passing by position; named args (`<name: value>`) where used
-- [ ] Function-local variable scope vs request-scoped `set`
+- [x] Same-file `function name(args)` declaration + `return`
+- [x] `script.call('./fn', args...)` resolves same-file functions
+- [x] `script.call('script/path:fn', args...)` resolves by fn name
+- [x] `page.call('./fn', args...)` (same dispatch as script.call for now)
+- [x] Argument passing by position
+- [x] Function-local variable scope vs request-scoped `set`
+- [-] Cross-file path-based dispatch — uses single global registry; later
+      phase keys by file when fn-name collisions appear
 
 ## Phase 5 — Standard library
 
 Built-in functions used pervasively.
 
-- [ ] `json.parse`, `json.json2pb`, `json.pb2json`
-- [ ] `pb.get`, `pb.set`, iterating PBs (`iterator.ofPB`)
-- [ ] Dates: `today()`, `now()`, `addDay`, `addMonth`, `format(date, fmt, locale)`
-- [ ] Strings: `replace`, `substring`, `startsWith`, `trim`, `lCase`, `uCase`, `chr`, `formatString`
-- [ ] Numbers: `lng`, `mul`, `div`, `sub`, `sum`, `mod`, `lt`, `gt`, `lte`, `gte`
-- [ ] `random()` (suitable for IDs)
+- [x] `json.parse`, `json.json2pb` (identity), `json.pb2json` (`formatted:`)
+- [x] `pb.get`, `pb.set`, `iterator.ofPB`, `iterator.ofToken`
+- [x] Dates: `today()`, `now()`, `addDay`, `addMonth`, `format(d, 'yyyy-MM-dd HH:mm')`
+- [x] Strings: `replace`, `substring`, `startsWith`, `trim`, `lCase`, `uCase`, `chr`, `formatString`, `strLength`
+- [x] Numbers: `lng`, `mul`, `div`, `sub`, `sum`, `mod`, `lt`, `gt`, `lte`, `gte`, `toLong`, `random`
+- [x] `if(cond, then, else)` accepted as an *expression*
 
 ## Phase 6 — POST body, forms, file upload
 
 Mutating routes.
 
-- [ ] `request.body()` returns raw POST body
-- [ ] `request.isPOST()`, `request.isGET()`, `request.isSameOrigin()`
-- [ ] `qs.getUntrusted(name)` works for both query and form-urlencoded body
-- [ ] Multipart parsing for file uploads
-- [ ] `response.redirect(url)` writes 302 + Location
+- [x] `request.body()` returns raw POST body
+- [x] `request.isPOST()`, `request.isGET()`, `request.isSameOrigin()`
+- [x] `qs.getUntrusted(name)` works for both query and form-urlencoded body
+- [x] `response.redirect(url)` writes 302 + Location
+- [-] Multipart parsing for file uploads — deferred (the existing app
+      uses base64-in-form-fields for images, no multipart needed yet)
 
 ## Phase 7 — Auth + sessions
 
 The bit you can never skip in production.
 
-- [ ] Cookie-based session storage (Postgres-backed)
-- [ ] Login page + login handler
-- [ ] `qualifier.call('session/cookie:authenticate')` equivalent
-- [ ] `[//route.trusted]` flag for whitelisted endpoints
-- [ ] `authenticate()` hook per script, replicating CaseMaster's contract
-- [ ] CSRF token (`__h=...` style) for in-app form submits
+- [x] `qualifier.call('session/cookie:authenticate')` stub (returns true)
+- [-] Cookie-based session storage — deferred (single-builtin swap)
+- [-] Login page + login handler — deferred
+- [-] `[//route.trusted]` flag — deferred
+- [-] CSRF token machinery — deferred
 
 ## Phase 8 — Static assets
 
