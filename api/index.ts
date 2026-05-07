@@ -68,6 +68,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Phase 11: warm-instance stats. ?stats=1 reports counts and timings.
+  // The AST-cache claim is "registry built once, reused thereafter" — this
+  // makes that visible without external tooling.
+  if (req.url && /[?&]stats=1/.test(req.url)) {
+    const tStart = Date.now();
+    let buildMs: number | null = null;
+    if (!appRegistry) {
+      const tBuild = Date.now();
+      try { registry(); } catch { /* surface in registryError */ }
+      buildMs = Date.now() - tBuild;
+    }
+    res.status(200).setHeader('Content-Type', 'application/json').send(JSON.stringify({
+      ok: true,
+      registryAlreadyWarm: buildMs === null,
+      registryBuildMs: buildMs,           // null when this request didn't build it
+      funcs: appRegistry?.funcs.size ?? 0,
+      resources: appRegistry?.resources.size ?? 0,
+      bos: appRegistry?.bos.size ?? 0,
+      requestTotalMs: Date.now() - tStart,
+      cold: !appRegistry,
+    }, null, 2));
+    return;
+  }
+
   try {
     // After Vercel's rewrite, req.url is `/api?_p=/page/foo/f/ping&…`.
     // The original path is forwarded through the `_p` query param (see
