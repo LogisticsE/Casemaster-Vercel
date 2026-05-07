@@ -25,9 +25,29 @@ function regions.
 ```bash
 git clone https://github.com/LadFoxTom/Casemaster-Vercel my-cms-app
 cd my-cms-app
+```
+
+Detach from upstream so this becomes *your* repo:
+
+**macOS / Linux / Git Bash:**
+```bash
 rm -rf .git && git init
+```
+
+**Windows PowerShell:**
+```powershell
+Remove-Item -Recurse -Force .git ; git init
+```
+
+Then:
+```bash
 npm install
 ```
+
+`npm install` triggers a `postinstall` hook that runs `tsc -p packages/runtime`
+to build the runtime's compiled JS into `packages/runtime/dist/`. If you
+ever skip this build (rare), the `cms-vercel-build` validator will tell
+you what to do.
 
 This gives you a working cms-vercel project. The runtime lives under
 `packages/runtime/`; everything you'll edit lives under `app/`,
@@ -51,29 +71,51 @@ concurrently while you migrate.
 
 ## 3. (Optional) Import an existing CaseMaster runtime
 
-If you already have a CaseMaster app you want to bring over:
+If you already have a CaseMaster app you want to bring over, point the
+import tool at its runtime directory. **Replace the example path** with
+your actual location:
 
 ```bash
-node packages/runtime/bin/import.mjs --from /path/to/casemaster-runtime
+# Linux / macOS / Git Bash
+node packages/runtime/bin/import.mjs --from ~/work/my-casemaster-runtime
+
+# Windows PowerShell
+node packages/runtime/bin/import.mjs --from C:\work\my-casemaster-runtime
+```
+
+Add `--dry-run` first to see what would be copied without writing
+anything:
+
+```bash
+node packages/runtime/bin/import.mjs --from C:\work\my-casemaster-runtime --dry-run
 ```
 
 This copies `bo/`, `page/`, `script/`, and `qualifier/` from the
 runtime tree into `app/`. It does not copy the framework's own files
 (only the project-specific ones), and it does not copy any database.
 
-Use `--dry-run` first to see what would be copied without writing
-anything.
-
 ## 4. Run locally
 
 ```bash
-npm run dev
+npx vercel dev
 ```
+
+> **Why `npx vercel dev` and not `npm run dev`?**
+> Vercel CLI v50+ inspects `package.json`'s `dev` script for the
+> "Development Command." If that script is itself `vercel dev`, you get
+> infinite recursion: `Error: vercel dev must not recursively invoke
+> itself`. The repo intentionally has **no** `dev` npm script for this
+> reason — invoke the Vercel CLI directly.
 
 Vercel's local emulator starts on `http://localhost:3000`. Same
 routing, same `.cms` files, same DB connection — only the binding
 differs from production. Edit `.cms` files and refresh; changes pick
 up on the next request.
+
+The first time you run it, `vercel` may ask you to log in and link the
+project. You can skip both prompts (press <kbd>n</kbd>) for purely
+local dev — the link is only needed when deploying or pulling envs
+from a remote Vercel project.
 
 The default scaffold serves these routes out of the box:
 
@@ -178,6 +220,10 @@ runtime.
 | Page is blank with `<!-- TODO render: <@page/...> -->` | The renderer doesn't yet handle that qualifier. Either skip the page or add a renderer in `packages/runtime/src/render.ts`. |
 | `Failed to connect to … 5432`              | Postgres compute is suspended (Neon free tier). Wait ~10 seconds and retry, or run a keepalive cron. |
 | `npm install` fails                        | Verify `node --version` is 20 or higher. Older Node doesn't support all the `import.meta` features the runtime relies on. |
+| `vercel dev` says **"must not recursively invoke itself"** | You ran `npm run dev` which calls `vercel dev`, which sees `dev` script and calls itself. Run `npx vercel dev` directly — the repo has no `dev` script for exactly this reason. |
+| `Cannot find module '…/packages/runtime/dist/index.js'` from `cms-vercel-build` or anything importing `cms-vercel` | The runtime hasn't been compiled. Run `npm run build`. Normally `npm install` runs this automatically via `postinstall`; if it didn't, your install probably had `--ignore-scripts`. |
+| `rm: cannot remove '.git'` or `Remove-Item: A parameter cannot be found that matches parameter name 'rf'` | You're in PowerShell. Use `Remove-Item -Recurse -Force .git` instead of `rm -rf .git`. |
+| Imported a CaseMaster runtime path that doesn't exist (`Error: ENOENT … scandir 'C:\path\to\…'`) | Replace the example placeholder with the **actual path** to your CaseMaster runtime, e.g. `C:\work\my-runtime` not `C:\path\to\casemaster-runtime`. |
 
 ## Going further
 

@@ -39,7 +39,17 @@ if (!existsSync(APP_DIR)) {
 // inside the package, so this works in both the workspace and a real
 // node_modules install. We don't import .ts directly — Node can't load
 // it without a loader.
-const cms = await import('cms-vercel');
+let cms;
+try {
+  cms = await import('cms-vercel');
+} catch (e) {
+  if (e?.code === 'ERR_MODULE_NOT_FOUND') {
+    console.error('cms-vercel-build: runtime not built (packages/runtime/dist/ missing).');
+    console.error('Fix:  npm run build');
+    process.exit(2);
+  }
+  throw e;
+}
 const { lex, parse } = cms;
 // Suppress unused-var linter warning for the file-URL import fallback.
 fileURLToPath; dirname;
