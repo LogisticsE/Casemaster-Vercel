@@ -1,151 +1,190 @@
-# How to launch your own CaseMaster app on Vercel
+# How to launch a CaseMaster app on Vercel
 
-Practical guide for the **Path A** distribution model (clone the repo,
-no npm publish yet). Once 9 Knots greenlights publishing, this same
-flow shrinks to `npm create cms-vercel my-app`.
+Step-by-step guide for shipping a CaseMaster `.cms` application as
+serverless functions on Vercel. Aimed at developers who already have
+some CaseMaster source they want to deploy — or who are starting from
+scratch and want a Vercel-native CaseMaster project.
 
-## The three questions
+## Prerequisites
 
-> **Can I open a new VS Code window, `npm install
-> github:LadFoxTom/Casemaster-Vercel#main`, and build a CaseMaster
-> project from there?**
+| Tool         | Why you need it                              | Check                  |
+|--------------|----------------------------------------------|------------------------|
+| **Node 20+** | Runtime requires native ESM + `import.meta`. | `node --version`       |
+| **Git**      | The project is distributed via a clone.      | `git --version`        |
+| **Postgres** | The runtime stores all state in Postgres.    | A connection string    |
+| **Vercel account** | Production hosting.                    | Free Hobby tier works  |
+| **GitHub or Bitbucket** | For Vercel's auto-deploy on push. | Any repo will do       |
 
-Not exactly that command — `npm install github:…` would put the whole
-repo under `node_modules/`, but the runtime lives in
-`packages/runtime/` (a workspace member), so the install wouldn't
-expose `cms-vercel` as a usable dependency. The right flow is to
-**clone or fork**, then work *inside* the cloned tree (steps below).
+A managed Postgres works fine — the runtime is tested against
+[Neon](https://neon.tech)'s free tier. Self-hosted is also fine; the
+only requirement is that the database is reachable from Vercel's
+function regions.
 
-> **Do we need a README in that folder, or HOWTOLAUNCH info?**
-
-Yes — this file. The repo root README describes the project; this
-file walks through the actual workflow.
-
-> **Can people host the system locally before deploying to Vercel?**
-
-Yes. `npm run dev` runs Vercel's local emulator on
-`http://localhost:3000`. Same routing, same `.cms` files, same DB
-connection — only difference is the binding (laptop vs Vercel
-infrastructure).
-
-## Five-minute quickstart
+## 1. Scaffold the project
 
 ```bash
-# 1. Clone the repo (or your fork)
 git clone https://github.com/LadFoxTom/Casemaster-Vercel my-cms-app
 cd my-cms-app
-
-# 2. Detach from upstream so this becomes YOUR project
-rm -rf .git
-git init
-
-# 3. Install dependencies (~30s)
+rm -rf .git && git init
 npm install
-
-# 4. Set the database URL — same string the official runtime uses
-cp .env.example .env.local
-#  edit .env.local and paste your Postgres connection string
-
-# 5. (Optional) Import your existing CaseMaster app's .cms files
-node packages/runtime/bin/import.mjs --from C:/path/to/casemaster-runtime
-#  copies bo/, page/, script/, qualifier/ into ./app/
-
-# 6. Run locally
-npm run dev
-#  → http://localhost:3000/page/foo/f/hello       (the demo page)
-#  → http://localhost:3000/page/foo/f/ping        (DB connectivity check)
-#  → http://localhost:3000/maintenance/qr/labelTemplate  (auto CRUD)
-
-# 7. Validate before deploying
-node packages/runtime/bin/build.mjs --app ./app
-#  reports unsupported builtins / qualifiers with file:line:col
-
-# 8. Deploy
-git add . && git commit -m 'init my CaseMaster app on Vercel'
-git remote add origin https://github.com/<you>/<your-repo>.git
-git push -u origin main
-#  then: vercel.com → New Project → import the repo →
-#         set DATABASE_URL in Settings → Environment Variables →
-#         disable Deployment Protection (Settings → Deployment Protection)
 ```
 
-After that first deploy, every `git push origin main` auto-builds and
-auto-publishes the new version. Branches get preview URLs.
+This gives you a working cms-vercel project. The runtime lives under
+`packages/runtime/`; everything you'll edit lives under `app/`,
+`public/`, and the project's root config files.
 
-## What's in the repo
+## 2. Configure the database
 
-| Path                          | What it is                                       |
-|-------------------------------|--------------------------------------------------|
-| `app/page/*.cms`              | Page handlers — your URLs                        |
-| `app/bo/*.cms`                | Business Object declarations — DB tables         |
-| `app/script/*.cms`            | Reusable scripts                                 |
-| `api/index.ts`                | 5-line Vercel-Function entrypoint                |
-| `public/`                     | Static assets, served at `/static/*`             |
-| `vercel.json`                 | Routing + cron + build configuration             |
-| `packages/runtime/`           | The interpreter — touch nothing unless you're upgrading the runtime |
-| `packages/create-cms-vercel/` | Future scaffold tool (not used in Path A yet)    |
+```bash
+cp .env.example .env.local
+```
 
-You only ever edit `app/`, `public/`, `.env.local`, `vercel.json`,
-and `package.json` (to add JS deps). Everything under
-`packages/runtime/` is "the framework."
+Open `.env.local` and set `DATABASE_URL`:
 
-## Local dev cycle
+```
+DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
+```
 
-`npm run dev` (which is `vercel dev` under the hood) gives you:
+This is the same connection-string format the official CaseMaster
+runtime uses. Both runtimes can read and write the same database
+concurrently while you migrate.
 
-- Hot-reload of `.cms` files — edit and refresh.
-- Real Postgres via the same `DATABASE_URL` you set in `.env.local`.
-- All five static-asset routes, auto-routing through `/static/*`,
-  `/page/*`, `/maintenance/*`.
+## 3. (Optional) Import an existing CaseMaster runtime
 
-The local server uses port 3000 by default (vs Vercel's deployed URL
-in production). Functionally identical — anything that works locally
-will work after `git push`.
+If you already have a CaseMaster app you want to bring over:
 
-## When to push to your own Vercel project
+```bash
+node packages/runtime/bin/import.mjs --from /path/to/casemaster-runtime
+```
 
-Two URLs to know:
+This copies `bo/`, `page/`, `script/`, and `qualifier/` from the
+runtime tree into `app/`. It does not copy the framework's own files
+(only the project-specific ones), and it does not copy any database.
 
-- `https://<your-project>-<your-team>.vercel.app` — the canonical
-  prod URL Vercel hands out. Public if you've disabled Deployment
-  Protection.
-- `https://<your-project>-git-<branch>-<your-team>.vercel.app` —
-  per-branch preview URL. Useful for sharing WIP without merging.
+Use `--dry-run` first to see what would be copied without writing
+anything.
 
-If your Vercel account is on the free Hobby tier, **disable
-Deployment Protection** under Project Settings — otherwise every URL
-returns `401 Authentication Required`.
+## 4. Run locally
 
-## Updating the runtime later
+```bash
+npm run dev
+```
 
-The runtime evolves. To pick up new builtins / bugfixes:
+Vercel's local emulator starts on `http://localhost:3000`. Same
+routing, same `.cms` files, same DB connection — only the binding
+differs from production. Edit `.cms` files and refresh; changes pick
+up on the next request.
+
+The default scaffold serves these routes out of the box:
+
+| URL                          | What                                   |
+|------------------------------|----------------------------------------|
+| `/`                          | Landing page (edit `public/index.html`)|
+| `/page/foo/f/hello`          | Demo page (edit `app/page/hello.cms`)  |
+| `/page/foo/f/ping`           | DB connectivity check                  |
+| `/api?diag=1`                | Registry health, app dir, env vars     |
+| `/api?stats=1`               | Function/resource/BO counts            |
+
+If you've imported an existing CaseMaster app, your URLs follow the
+same `/page/<script>/f/<function>` and `/maintenance/<bo>` patterns
+the official runtime uses.
+
+## 5. Validate before deploying
+
+```bash
+node packages/runtime/bin/build.mjs --app ./app
+```
+
+The validator walks every `.cms` file and reports:
+
+- **Errors**: parse failures (file:line:col) — fix before deploying.
+- **Warnings**: calls or qualifiers the runtime doesn't yet implement.
+  These won't block the build; the page using them will fault at
+  request time.
+
+Add `--strict` to promote warnings to errors when wiring CI.
+
+## 6. Push to GitHub or Bitbucket
+
+```bash
+git add .
+git commit -m "init my CaseMaster app"
+git remote add origin git@github.com:<you>/<your-repo>.git
+git push -u origin main
+```
+
+## 7. Connect Vercel
+
+1. **vercel.com → Add New → Project → Import** the repo.
+2. **Settings → Environment Variables → Add new**
+   - Key: `DATABASE_URL`
+   - Value: your Postgres connection string
+   - Environments: ✓ Production ✓ Preview ✓ Development
+3. **Settings → Deployment Protection** → set to **Disabled** (or
+   "Only Preview Deployments" if you want previews behind auth).
+   Without this step, every URL returns `401 Authentication Required`.
+4. **Deployments → Redeploy** to apply the env var.
+
+After the first deploy:
+
+- `https://<your-project>-<your-team>.vercel.app` is your production URL.
+- `https://<your-project>-git-<branch>-<your-team>.vercel.app` is the
+  per-branch preview URL.
+- Every `git push origin main` auto-deploys.
+
+## Project layout
+
+| Path                          | Description                                   | You edit it? |
+|-------------------------------|-----------------------------------------------|:------------:|
+| `app/page/*.cms`              | Page handlers (your URLs)                     | ✓            |
+| `app/bo/**/*.cms`             | Business Object declarations (DB tables)      | ✓            |
+| `app/script/**/*.cms`         | Reusable scripts                              | ✓            |
+| `api/index.ts`                | 5-line Vercel-Function entrypoint             | rarely       |
+| `public/`                     | Static assets, served at `/static/*`          | ✓            |
+| `vercel.json`                 | Routing, cron, build configuration            | rarely       |
+| `package.json`                | npm metadata + scripts                        | ✓            |
+| `packages/runtime/`           | The interpreter — leave alone unless upgrading the runtime | × |
+| `private-app/` (if present)   | Project-specific source kept out of the public deploy | ✓ |
+
+The contract is simple: you own `app/`, `public/`, `vercel.json`, and
+`package.json`. Everything under `packages/runtime/` is "the
+framework" — touch it only when you intentionally want to upgrade or
+extend it.
+
+## Updating the runtime
+
+When the upstream runtime adds new builtins or qualifiers:
 
 ```bash
 git remote add upstream https://github.com/LadFoxTom/Casemaster-Vercel.git
 git fetch upstream
 git merge upstream/main
-# resolve any conflicts (you only own app/, public/, vercel.json,
-# .env.local, so conflicts should be minimal)
 npm install
 git push
 ```
 
-Vercel rebuilds and you're on the new runtime.
+You should rarely see conflicts because the only files you own
+(`app/`, `public/`, `vercel.json`, `.env.local`, `package.json`) are
+disjoint from the runtime's. Vercel rebuilds, you're on the new
+runtime.
 
-## Troubleshooting
+## Common issues
 
-| Symptom                              | Likely cause + fix                                       |
-|--------------------------------------|----------------------------------------------------------|
-| `401 Authentication Required`        | Vercel Deployment Protection on. Disable it.             |
-| `500 FUNCTION_INVOCATION_FAILED`     | Module-load error. Hit `/api?diag=1` for the real cause. |
-| `unimplemented call: bo.X`           | An unsupported builtin. Run `cms-vercel-build` to find it. |
-| Page is blank with `<!-- TODO render: <@page/...> -->` | We don't render that qualifier yet. Either skip the page or contribute the renderer. |
-| `Failed to connect to … 5432`        | Neon's compute is suspended. Wait ~10s or run a keepalive cron. |
-| `npm install` fails                  | Need Node 20+ (`node --version`). Older versions don't support `import.meta` reliably. |
+| Symptom                                    | Fix                                           |
+|--------------------------------------------|-----------------------------------------------|
+| `401 Authentication Required` from Vercel  | Disable Deployment Protection (Settings → Deployment Protection). |
+| `500 FUNCTION_INVOCATION_FAILED`           | Hit `/api?diag=1` for the underlying error. Usually `DATABASE_URL` not set or app dir not found. |
+| `unimplemented call: bo.X`                 | Run `cms-vercel-build` to find every unsupported builtin in your app. See `UNSUPPORTED.md`. |
+| Page is blank with `<!-- TODO render: <@page/...> -->` | The renderer doesn't yet handle that qualifier. Either skip the page or add a renderer in `packages/runtime/src/render.ts`. |
+| `Failed to connect to … 5432`              | Postgres compute is suspended (Neon free tier). Wait ~10 seconds and retry, or run a keepalive cron. |
+| `npm install` fails                        | Verify `node --version` is 20 or higher. Older Node doesn't support all the `import.meta` features the runtime relies on. |
 
-## What works today vs. what doesn't
+## Going further
 
-See [`UNSUPPORTED.md`](./UNSUPPORTED.md) — the canonical list. The
-**`cms-vercel-build` validator** is the right tool for finding what
-your specific app uses that isn't supported yet. Run it before every
-deploy.
+- **`UNSUPPORTED.md`** — what doesn't work yet. The validator
+  (`cms-vercel-build`) reports all of these in your specific app.
+- **`packages/runtime/API.md`** — every supported builtin, with
+  signatures and notes.
+- **`packages/runtime/MIGRATION.md`** — porting a real CaseMaster
+  app to Vercel.
+- **`ROADMAP.md`** — what's planned next, what's deferred.
