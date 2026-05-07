@@ -1,0 +1,17 @@
+// Phase 1 test fixture — same shape as the runtime's
+// /page/axylog/f/ping endpoint. Counts rows in qr_label_template and
+// returns "ok N\n" as text/plain.
+function ping()
+    set('rows', 0)
+    iterate iterator.ofEntity(
+        entities: <@iterator/entity name: 'tt', entity: 'qr/labelTemplate', orderBy: 'id'>,
+        rows: 1
+    )
+        set('rows', sum([rows], 1))
+    end-iterate
+    response.clearContent()
+    response.setContentType('text/plain')
+    response.write(concat('ok ', formatString('{0}', [rows]), chr(10)))
+    response.flush()
+    response.end()
+end-function
