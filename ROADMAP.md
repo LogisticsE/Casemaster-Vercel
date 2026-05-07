@@ -175,21 +175,29 @@ The "git push and it works" part.
 
 After Phase 1 it works; this makes it fast.
 
-- [ ] Parse `.cms` files at module load, not per request (warm-instance caching)
-- [ ] Optional AOT: a build step that emits a `.ts` per `.cms` function
-- [ ] Edge runtime experiment for read-only endpoints
-- [ ] Cold-start measurement vs CaseMaster cold-start vs Neon cold-start
-- [ ] Postgres connection-pool sizing per Vercel's invocation model
+- [x] AST cache: registry built once per warm instance (was already
+      true; Phase 11 made it observable)
+- [x] `/api?stats=1` reports registry warmth, fn/resource/BO counts,
+      and request total ms — distinguishes real slowness from cold start
+- [x] `tools/bench.mjs` standalone latency harness (min/p50/p95/max).
+      First run on live URL: cold ~1071ms, p50 warm ~289ms.
+- [x] Postgres pool sized for Vercel's invocation model (`db.ts`)
+- [-] AOT compile to `.ts` — deferred; AST cache covers the hot path
+- [-] Edge runtime — deferred; `pg` doesn't run on edge today
 
 ## Phase 12 — Migration tooling + parity tests
 
 How a CaseMaster owner brings their app over.
 
-- [ ] `cmsv import <CaseMaster-runtime-dir>` lays out a Vercel project
-- [ ] Conformance suite: same `.cms` app run on both runtimes, byte-compare
-  HTTP responses for a curated URL list
-- [ ] Playwright parity suite (visual + interaction parity)
-- [ ] Documented "unsupported features" list as it grows
+- [x] `tools/import.mjs --from <runtime-dir>` copies bo/, page/,
+      script/, qualifier/ trees into `app/`. `--dry-run` prints the
+      plan. Tested: 86 .cms / 23 dirs / 863 KB from real Axylog runtime.
+- [x] `tests/parity/ping.spec.ts` compares both runtimes when both
+      URLs are configured (env-gated)
+- [x] `UNSUPPORTED.md` catalogues runtime-faulting, partial, and
+      never-going-to features
+- [-] Playwright parity suite — deferred until enough pages are ported
+      that visual diffs are meaningful
 
 ---
 
