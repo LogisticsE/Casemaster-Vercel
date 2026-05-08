@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Phase 12 — `cmsv import`.
 // Copies the .cms source tree from a CaseMaster runtime layout into this
 // project's app/ directory. Knows about the conventional CaseMaster

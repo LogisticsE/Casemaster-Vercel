@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Phase 11 — latency benchmark.
 // Hits a URL N times sequentially and reports min/median/p95/max.
 // Use it to compare: (1) cold-start (kill the function, hit once), (2)

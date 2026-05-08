@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // cms-vercel-dev — local dev server without `vercel dev`'s 2.5s/request overhead.
 //
 // Imports the user's api/index.{ts,js}, wraps it in a plain Node http server,
