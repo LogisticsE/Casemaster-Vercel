@@ -249,6 +249,7 @@ async function dispatch(
   // call (e.g. `$getTranslation` returns the key as fallback).
   if (key.startsWith('$')) key = key.slice(1);
 
+  try {
   switch (key) {
     case 'set': {
       // already lifted to A.Set in the parser, but still callable as an
@@ -920,6 +921,16 @@ async function dispatch(
 
     default:
       throw new RuntimeError(loc, `unimplemented call: ${key}`);
+  }
+  } catch (e: any) {
+    // Pass through our own typed signals — they're how we implement
+    // `return` and structured raises and must reach their handlers.
+    if (e instanceof RuntimeError)  throw e;
+    if (e instanceof ReturnSignal)  throw e;
+    // Anything else (Postgres error, fetch error, JS TypeError…) gets
+    // wrapped with the .cms file:line so the user sees which line of
+    // .cms caused it instead of just the underlying library frame.
+    throw new RuntimeError(loc, `${key}: ${e?.message ?? String(e)}`);
   }
 }
 
