@@ -26,9 +26,13 @@ $ DATABASE_URL=postgresql://… npm test
 
 | Path           | What                                                     |
 |----------------|----------------------------------------------------------|
+| `HOWTOLAUNCH.md` | Quickstart: clone → install → local dev → deploy       |
+| `BUILDING.md`  | Building a new CaseMaster app from scratch               |
+| `CONVERTING.md`| Porting an existing CaseMaster app to Vercel             |
 | `ROADMAP.md`   | Single source of truth for status (update this)          |
 | `WHAT.md`      | Project description, architecture, scope                 |
 | `HOW.md`       | Tech stack + design decisions                            |
+| `UNSUPPORTED.md` | What doesn't work yet                                  |
 | `api/`         | Vercel function (catch-all router)                       |
 | `src/cms/`     | Lexer, parser, AST, interpreter, BO/SQL, Postgres pool   |
 | `app/`         | The `.cms` application — copy from CaseMaster, untouched |
