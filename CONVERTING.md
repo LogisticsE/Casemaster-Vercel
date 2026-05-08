@@ -150,6 +150,27 @@ If your existing app uses SQLite, MS SQL, or Oracle, you'll need to
 move the schema to Postgres first. cms-vercel does not ship a
 non-Postgres adapter and won't.
 
+**Format note**: paste the URL **without surrounding quotes** —
+`DATABASE_URL=postgres://user:pass@host/db?sslmode=require` (not
+`DATABASE_URL='postgres://...'`). Vercel CLI's env loader handles
+quotes inconsistently across versions and silently passes an empty
+value if it can't parse the line.
+
+**Linked-project gotcha**: once `vercel dev` links to a cloud project
+(`.vercel/project.json` exists), env vars from `.env.local` may be
+shadowed by the cloud project's env. If `/api?diag=1` shows
+`hasDbUrl: false` despite a populated `.env.local`, push the var to
+the cloud project explicitly:
+
+```powershell
+npx vercel env add DATABASE_URL development
+# paste the URL when prompted
+```
+
+Then restart `vercel dev`. The diag endpoint also lists every
+non-system env key the function process can see (`userEnvKeys`),
+which makes "is `.env.local` actually loaded?" easy to answer.
+
 ### 5. Walk through the URLs
 
 Start the dev server:
