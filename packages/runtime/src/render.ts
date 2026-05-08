@@ -97,12 +97,13 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
       };
 
       const tableCls = 'cms-table table table-sm table-striped table-bordered table-hover';
-      if (!rows.length || !cols.length) {
+      // Truly columnless table (no BO + no rows): emit a single placeholder.
+      if (!cols.length) {
         return `<div class="table-responsive"><table class="${tableCls}"><tbody><tr><td class="empty text-muted">no rows</td></tr></tbody></table></div>`;
       }
-      // Wrap in .table-responsive so wide tables scroll horizontally instead
-      // of overflowing the page container. <thead> matches the official
-      // CaseMaster runtime's `bg-primary text-light` styling.
+      // Otherwise render the header row regardless — when rows is empty we
+      // still show the columns so the user sees what the table would
+      // contain (matches the official runtime).
       let html = `<div class="table-responsive"><table class="${tableCls}"><thead class="bg-primary text-light"><tr>`;
       for (const c of cols) html += `<th scope="col">${esc(labelOf(c))}</th>`;
       html += '</tr></thead><tbody>';
