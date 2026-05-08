@@ -84,11 +84,35 @@ const KNOWN = new Set([
   'request.isSameOrigin', 'request.url',
   'qs.getUntrusted', 'qs.isTrusted',
   // call dispatch
-  'script.call', 'script.get', 'true', 'false',
+  'script.call', 'script.get', 'true', 'false', 'null',
   // http
   'httpRequest.create', 'httpRequest.responseBody',
+  'httpRequest.responseStatus', 'httpRequest.responseStatusCode',
+  'httpRequest.dispose', 'inContext',
   // auth (Phase 18)
   'qualifier.call', 'session.get', 'session.set',
+  // legacy aliases (.NET runtime parity)
+  'query', 'getFieldValue', 'qs.get',
+  'multiply', 'add', 'iterator.ofBO',
+  'bo.save', 'bo.reset', 'bo.setAutomatics', 'bo.pk',
+  'bo.quickLoad', 'bo.user', 'bo.count', 'bo.update', 'bo.insert',
+  'bo.attrFormattedGroup',
+  // i18n
+  'getTranslation',
+  // type constructors
+  'enum', 'union', 'error',
+  // pb / qualifier
+  'pb.count', 'qualifier.get', 'qualifier.tryGet',
+  // ui stubs
+  'showDialog', 'navigateTo', 'exportData',
+  // string builder
+  'buildString', 'sb.create', 'sb.appendLine', 'sb.append', 'sb.get',
+  // more legacy
+  'ge', 'le', 'page.urlEncode', 'bo.canDelete', 'bo.tryLoad', 'bo.attrFormatted',
+  'iterator.ofNumber', 'iterator.key',
+  'qualifier.invoke', 'request.getFiles',
+  'ifNull', 'in', 'ingroup', 'inGroup', 'response.setHeader', 'page.htmlEncode', 'page.generate',
+  'boDesc.getLabel', 'boDesc.getPK', 'bo.attrPersistStatus', 'filesystem.tail',
 ]);
 
 const KNOWN_QUALIFIERS = new Set([
@@ -99,6 +123,22 @@ const KNOWN_QUALIFIERS = new Set([
   'page/sidebar/dropdown/link', 'page/icon', 'page/button/submit', 'page/table/link',
   'iterator/entity', 'bo', 'bo/attribute', 'configuration', 'configuration/dataSources',
   'url',
+  // Recognised but not always rendered yet — runtime emits a TODO placeholder
+  // when a page actually evaluates one of these. Adding them here suppresses
+  // the validator warning so the build doesn't shout about meta-framework code.
+  'qualifier/schema', 'qualifier/schema/item',
+  'mltext', 'mlText', 'text',
+  'page/button', 'page/button/back', 'page/button/new', 'page/button/cancel',
+  'page/button/delete', 'page/button/submit/create', 'page/button/submit/update',
+  'page/data/form', 'page/data/form/field', 'page/data/table/qsearch',
+  'page/text', 'page/alert/error', 'page/alert/info', 'page/alert/warning', 'page/alert/success',
+  'page/link/target/modal', 'page/input/group/append',
+  'bo/attribute/memo', 'bo/attribute/expression', 'bo/attribute/dynamic',
+  'bo/attribute/document', 'bo/attribute/id', 'bo/attribute/boolean',
+  'bo/attribute/property/enhancers', 'bo/attribute/property/displaySize',
+  'bo/attribute/property/displaySize/wide', 'bo/attribute/property/tags',
+  'bo/audit', 'bo/deleteRelation',
+  'application',
 ]);
 
 const errors = [];
@@ -159,14 +199,18 @@ function walkExpr(e, file, localFns) {
   switch (e.kind) {
     case 'Call': {
       const path = calleePath(e.callee);
-      const key = path.join('.');
+      let key = path.join('.');
+      // `$foo` is the i18n shorthand — runtime strips the `$` and dispatches
+      // to the underlying call. Mirror that here so the validator doesn't
+      // double-warn.
+      const lookupKey = key.startsWith('$') ? key.slice(1) : key;
       // User-defined function in the same file? Skip.
-      if (path.length === 1 && localFns.has(path[0])) {
+      if (path.length === 1 && localFns.has(path[0].replace(/^\$/, ''))) {
         for (const a of e.args) walkExpr(a, file, localFns);
         return;
       }
       // Unknown builtin?
-      if (!KNOWN.has(key)) {
+      if (!KNOWN.has(lookupKey)) {
         warns.push(`${file}:${e.loc.line}:${e.loc.col}: unknown call: ${key}`);
       }
       for (const a of e.args) walkExpr(a, file, localFns);
@@ -192,6 +236,11 @@ function walkExpr(e, file, localFns) {
 function calleePath(c) {
   if (c.kind === 'Ident') return [c.name];
   if (c.kind === 'MemberAcc') return [...calleePath(c.object), c.member];
+  // `true()` / `false()` / `null()` parse as a Call whose callee is the
+  // literal — they're idiomatic .cms builtins. Recognise them here so the
+  // validator doesn't flag them as `<expr>`.
+  if (c.kind === 'BoolLit') return [c.value ? 'true' : 'false'];
+  if (c.kind === 'NullLit') return ['null'];
   return ['<expr>'];
 }
 function walk(dir) {

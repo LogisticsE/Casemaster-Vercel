@@ -251,27 +251,27 @@ describe('Phase 19 — page qualifiers', () => {
   });
 });
 
-describe('hello.cms (Phase 2)', () => {
-  it('parses + renders to HTML containing the greeting', async () => {
+describe('welcome.cms (starter landing page)', () => {
+  it('parses + renders to HTML containing the welcome content', async () => {
     const reg = loadApp(join(process.cwd(), 'app'));
-    expect(reg.funcs.has('hello')).toBe(true);
-    expect(reg.resources.has('helloBody')).toBe(true);
-    expect(reg.resources.has('helloShell')).toBe(true);
+    expect(reg.funcs.has('welcome')).toBe(true);
+    expect(reg.resources.has('welcomeBody')).toBe(true);
+    expect(reg.resources.has('welcomeShell')).toBe(true);
 
     const ctx: Ctx = {
       funcs: reg.funcs,
       resources: reg.resources,
       bos: reg.bos,
-      req: { method: 'GET', url: '/page/foo/f/hello', query: {}, body: '' },
+      req: { method: 'GET', url: '/page/welcome/f/welcome', query: {}, body: '' },
       res: { contentType: 'text/html', body: '', status: 200, headers: {} },
     };
-    await callFunction(ctx, 'hello');
+    await callFunction(ctx, 'welcome');
 
     expect(ctx.res.contentType).toMatch(/text\/html/);
     expect(ctx.res.body).toContain('<!doctype html>');
-    expect(ctx.res.body).toContain('Hello from cms-vercel');
-    expect(ctx.res.body).toContain('Phase 2');
-    // resolveTemplate substituted [subtitle] with the eval'd concat
-    expect(ctx.res.body).toContain('Time on server: 2');
+    expect(ctx.res.body).toContain('cms-vercel');
+    expect(ctx.res.body).toContain('Where to put your code');
+    // The welcome page shows the live demo links to ping + stats.
+    expect(ctx.res.body).toContain('/page/ping/f/ping');
   });
 });

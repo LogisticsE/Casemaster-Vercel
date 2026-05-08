@@ -14,10 +14,15 @@ export interface Loc {
 export type Node = Func | Resource | Stmt | Expr;
 
 // ─── Top-level ─────────────────────────────────────────────────────
+export interface Param {
+  name: string;
+  default_: Expr | null;
+}
+
 export interface Func {
   kind: 'Func';
   name: string;
-  params: string[];
+  params: Param[];
   body: Stmt[];
   loc: Loc;
 }
@@ -37,7 +42,9 @@ export type Stmt =
   | If
   | Iterate
   | Return
+  | ExitFunction
   | Raise
+  | Try
   | ExprStmt;
 
 export interface Set {
@@ -67,6 +74,24 @@ export interface Iterate {
 export interface Return {
   kind: 'Return';
   value: Expr | null;
+  loc: Loc;
+}
+
+// `exit-function` is an early return without a value.
+export interface ExitFunction {
+  kind: 'ExitFunction';
+  loc: Loc;
+}
+
+// `try ... catch <var> ... finally ... end-try`
+// The .cms forms used in the wild are `try / finally / end-try` (axylog) and
+// `try / catch / finally / end-try`. Catch and finally are both optional.
+export interface Try {
+  kind: 'Try';
+  body: Stmt[];
+  catchVar: string | null;   // name of bound exception variable, or null
+  catch_: Stmt[] | null;
+  finally_: Stmt[] | null;
   loc: Loc;
 }
 

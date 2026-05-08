@@ -91,7 +91,15 @@ export async function callFunction(ctx: Ctx, name: string, args: Value[] = []): 
   const fn = ctx.funcs.get(name);
   if (!fn) throw new Error(`function not found: ${name}`);
   const scope = new Scope();
-  fn.params.forEach((p, i) => scope.set(p, args[i] ?? null));
+  for (let i = 0; i < fn.params.length; i++) {
+    const p = fn.params[i]!;
+    let v: Value = args[i] ?? null;
+    // Apply default if caller passed nothing (undefined) or null and a default exists.
+    if ((args[i] === undefined || args[i] === null) && p.default_) {
+      v = await evalExpr(ctx, scope, p.default_);
+    }
+    scope.set(p.name, v);
+  }
   try {
     await execBlock(ctx, scope, fn.body);
     return null;
@@ -141,9 +149,27 @@ async function execStmt(ctx: Ctx, scope: Scope, s: A.Stmt): Promise<void> {
       const v = s.value ? await evalExpr(ctx, scope, s.value) : null;
       throw new ReturnSignal(v);
     }
+    case 'ExitFunction': {
+      throw new ReturnSignal(null);
+    }
     case 'Raise': {
       const msg = String(await evalExpr(ctx, scope, s.message));
       throw new RuntimeError(s.loc, msg);
+    }
+    case 'Try': {
+      try {
+        await execBlock(ctx, scope, s.body);
+      } catch (e) {
+        if (e instanceof ReturnSignal) throw e;          // never catch returns
+        if (s.catch_) {
+          if (s.catchVar) scope.set(s.catchVar, e instanceof Error ? e.message : String(e));
+          await execBlock(ctx, scope, s.catch_);
+        }
+        // `try / finally / end-try` (no catch) absorbs errors silently — matches .cms semantics.
+      } finally {
+        if (s.finally_) await execBlock(ctx, scope, s.finally_);
+      }
+      return;
     }
     case 'ExprStmt': {
       await evalExpr(ctx, scope, s.expr);
@@ -204,7 +230,11 @@ async function dispatch(
   args: Value[], named: Record<string, Value>, loc: A.Loc
 ): Promise<Value> {
   const path = calleePath(callee);   // e.g. ['set'] or ['response','write'] or ['iterator','ofEntity']
-  const key = path.join('.');
+  let key = path.join('.');
+  // `$foo` / `$bo.attr` is CaseMaster's i18n shorthand: strip the `$` and
+  // dispatch as the underlying call. The translations layer is handled per
+  // call (e.g. `$getTranslation` returns the key as fallback).
+  if (key.startsWith('$')) key = key.slice(1);
 
   switch (key) {
     case 'set': {
@@ -607,9 +637,262 @@ async function dispatch(
       return null;
     }
 
+    // ─── Legacy aliases (.NET runtime parity) ───────────────────────
+    // CaseMaster's older surface uses different names for things cms-vercel
+    // already implements. Keep both available so .cms files don't need
+    // to be edited when porting.
+    case 'query':              return await dispatch(ctx, scope, idIdent('sql.fetch'),       args, named, loc);
+    case 'getFieldValue':      return await dispatch(ctx, scope, idIdent('qs.getUntrusted'), args, named, loc);
+    case 'qs.get':             return await dispatch(ctx, scope, idIdent('qs.getUntrusted'), args, named, loc);
+    case 'multiply':           return num(args[0]!) * num(args[1]!);
+    case 'add':                return args.reduce((a: number, b) => a + num(b!), 0);
+    case 'iterator.ofBO':      return await dispatch(ctx, scope, memberIdent('iterator', 'ofEntity'), args, named, loc);
+
+    case 'bo.save':            return await dispatch(ctx, scope, memberIdent('bo', 'persist'), args, named, loc);
+    case 'bo.reset':           return args[0] ?? null;   // .NET runtime resets in-memory edits — we keep the row.
+    case 'bo.setAutomatics':   return args[0] ?? null;   // computed-attribute pass — runtime computes them on read.
+    case 'bo.pk': {
+      const row = args[0] as Row | undefined;
+      if (!isRow(row)) return null;
+      const info = row.entity ? ctx.bos.get(row.entity) : undefined;
+      const pk = info?.primaryKey ?? 'id';
+      return (row.data[pk] ?? null) as Value;
+    }
+    case 'bo.quickLoad': {
+      // bo.quickLoad('entity', pk) → fetch one row by primary key.
+      const entityName = String(args[0] ?? '');
+      const info = ctx.bos.get(entityName);
+      const tbl = info?.table ?? entityToTable(ctx, entityName);
+      const pk  = info?.primaryKey ?? 'id';
+      const rows = await query(`SELECT * FROM ${tbl} WHERE ${pk} = $1 LIMIT 1`, [args[1] ?? null]);
+      if (!rows[0]) return null;
+      return { __kind: 'Row', data: rows[0] as any, entity: entityName } as Row;
+    }
+    case 'bo.user': {
+      // .NET runtime returns the currently-logged-in user row. We synthesise
+      // a row from the session payload — enough that bo.attr([_user], 'name') works.
+      const u = (ctx.session?.payload?.user as Record<string, unknown> | undefined) ?? {};
+      return { __kind: 'Row', data: u as any, entity: 'user' } as Row;
+    }
+    case 'bo.count': {
+      const entityName = String(args[0] ?? '');
+      const where = args[1] ? String(args[1]) : '';
+      const info = ctx.bos.get(entityName);
+      const tbl = info?.table ?? entityToTable(ctx, entityName);
+      let sql = `SELECT count(*) AS n FROM ${tbl}`;
+      if (where) sql += ` WHERE ${compileWhere(where)}`;
+      const rows = await query(sql);
+      return Number((rows[0] as any)?.n ?? 0);
+    }
+    case 'bo.update':          return await dispatch(ctx, scope, memberIdent('bo', 'persist'), args, named, loc);
+    case 'bo.insert':          return await dispatch(ctx, scope, memberIdent('bo', 'persist'), args, named, loc);
+    case 'bo.attrFormattedGroup': {
+      // .NET runtime returns the BO's pre-formatted "label" attribute group as
+      // a single concatenated string. Without the schema we just return the
+      // requested column verbatim.
+      const row = args[0] as Row | undefined;
+      const col = String(args[1] ?? 'label');
+      if (!isRow(row)) return '';
+      return String(row.data[col] ?? '');
+    }
+
+    // ─── i18n shorthand (translations) ──────────────────────────────
+    // `$getTranslation('label/foo')` / `getTranslation('label/foo')`. Without
+    // a translation source we return the last segment as a UI fallback —
+    // good enough that pages render with a readable label.
+    case 'getTranslation': {
+      const k = String(args[0] ?? '');
+      const seg = k.split('/').pop() ?? k;
+      return seg.replace(/([A-Z])/g, ' $1').trim();
+    }
+
+    // ─── Type constructors ──────────────────────────────────────────
+    // Used in BO declarations (`<@bo dataType: dataType.String>` etc.) and
+    // in the .NET runtime's type system. We just return the input so the
+    // surrounding qualifier sees a non-null value.
+    case 'enum':               return args[0] ?? null;
+    case 'union':              return args[0] ?? null;
+    case 'error': {
+      // `error('msg')` → throw — most .cms code uses `error(...)` as an
+      // early-return signal for invalid input.
+      const msg = String(args[0] ?? 'error');
+      throw new RuntimeError(loc, msg);
+    }
+
+    // ─── PB helpers ─────────────────────────────────────────────────
+    case 'pb.count': {
+      const v = args[0];
+      if (v && typeof v === 'object' && (v as any).__kind === 'Qualifier') {
+        return Object.keys((v as any).props).length;
+      }
+      if (Array.isArray(v)) return v.length;
+      return 0;
+    }
+
+    // ─── Qualifier introspection ────────────────────────────────────
+    case 'qualifier.get': {
+      // Resolves a qualifier reference (`'./resourceName'`) to the resource AST.
+      // For now return the resource's body expression so callers can pass it on.
+      const ref = String(args[0] ?? '');
+      const name = ref.startsWith('./') ? ref.slice(2) : ref;
+      const r = ctx.resources.get(name);
+      if (!r) throw new RuntimeError(loc, `qualifier.get: not found: ${ref}`);
+      return await evalExpr(ctx, scope, r.body);
+    }
+    case 'qualifier.tryGet': {
+      const ref = String(args[0] ?? '');
+      const name = ref.startsWith('./') ? ref.slice(2) : ref;
+      const r = ctx.resources.get(name);
+      if (!r) return null;
+      try { return await evalExpr(ctx, scope, r.body); } catch { return null; }
+    }
+
+    // ─── UI / server stubs ──────────────────────────────────────────
+    // showDialog opens a modal in the .NET runtime via a JS bridge. On
+    // Vercel we have no persistent client connection at request time;
+    // skip silently so the surrounding page still renders.
+    case 'showDialog':         return null;
+    // navigateTo issues a redirect after the page handler finishes.
+    case 'navigateTo': {
+      ctx.res.redirect = String(args[0] ?? '');
+      ctx.res.status = 302;
+      return null;
+    }
+    // exportData wires CSV / Excel output in the .NET runtime; we throw a
+    // descriptive error so the missing endpoint is obvious in logs.
+    case 'exportData':
+      throw new RuntimeError(loc, `exportData is not yet implemented in cms-vercel`);
+
+    // ─── More legacy aliases / helpers ──────────────────────────────
+    case 'buildString':         return args.map(a => stringify(a)).join('');
+    case 'ge':                  return num(args[0]!) >= num(args[1]!);
+    case 'le':                  return num(args[0]!) <= num(args[1]!);
+    case 'page.urlEncode':      return encodeURIComponent(String(args[0] ?? ''));
+    case 'bo.canDelete':        return true;        // permission check stub — always allow
+    case 'bo.tryLoad': {
+      const entityName = String(args[0] ?? '');
+      const info = ctx.bos.get(entityName);
+      const tbl = info?.table ?? entityToTable(ctx, entityName);
+      const pk  = info?.primaryKey ?? 'id';
+      try {
+        const rows = await query(`SELECT * FROM ${tbl} WHERE ${pk} = $1 LIMIT 1`, [args[1] ?? null]);
+        if (!rows[0]) return null;
+        return { __kind: 'Row', data: rows[0] as any, entity: entityName } as Row;
+      } catch { return null; }
+    }
+    case 'bo.attrFormatted': {
+      // Format-aware attribute getter. Without a schema we pass through
+      // the raw value as a string.
+      const row = args[0] as Row | undefined;
+      const col = String(args[1] ?? '');
+      if (!isRow(row)) return '';
+      return String(row.data[col] ?? '');
+    }
+    case 'iterator.ofNumber': {
+      // CaseMaster iterates a numeric range. We accept (start, end) or (count).
+      const a = num(args[0] ?? 0);
+      const b = args[1] !== undefined ? num(args[1]) : a;
+      const start = args[1] !== undefined ? a : 0;
+      const end = args[1] !== undefined ? b : a;
+      const rows: Row[] = [];
+      for (let n = start; n <= end; n++) {
+        rows.push({ __kind: 'Row', data: { value: n, n } as any });
+      }
+      return { __kind: 'Iter', iterName: 'r', rows } as Iter;
+    }
+    case 'iterator.key':        return scope.get('__loop_key') ?? null;
+
+    // String-builder pattern. .NET runtime returns a mutable handle; we
+    // model it as a tagged record so subsequent sb.* calls can find it.
+    case 'sb.create':           return { __kind: 'SB', parts: [] as string[] } as any;
+    case 'sb.appendLine': {
+      const sb = args[0] as any;
+      if (sb && sb.__kind === 'SB') sb.parts.push(stringify(args[1] ?? ''));
+      return sb ?? null;
+    }
+    case 'sb.append': {
+      const sb = args[0] as any;
+      if (sb && sb.__kind === 'SB') sb.parts.push(stringify(args[1] ?? ''));
+      return sb ?? null;
+    }
+    case 'sb.get': {
+      const sb = args[0] as any;
+      if (sb && sb.__kind === 'SB') return (sb.parts as string[]).join('\n');
+      return '';
+    }
+    case 'qualifier.invoke': {
+      // Synonym for qualifier.get — invokes a resource and returns its value.
+      return await dispatch(ctx, scope, memberIdent('qualifier', 'get'), args, named, loc);
+    }
+    case 'request.getFiles':
+      return { __kind: 'Qualifier', path: ['_list'], props: {}, loc } as Qualifier;
+
+    case 'ifNull':              return (args[0] === null || args[0] === undefined) ? (args[1] ?? null) : args[0];
+    case 'in': {
+      // `in(needle, haystack1, haystack2, …)` → true if needle equals any of the rest.
+      const needle = stringify(args[0] ?? null);
+      for (let k = 1; k < args.length; k++) if (stringify(args[k] ?? null) === needle) return true;
+      return false;
+    }
+    case 'ingroup':
+    case 'inGroup': {
+      // `ingroup(user, 'admin')` — checks group membership. We approximate with
+      // the session payload's `groups` list when present.
+      const groups = (ctx.session?.payload?.groups as string[] | undefined) ?? [];
+      return groups.includes(String(args[1] ?? args[0] ?? ''));
+    }
+    case 'response.setHeader': {
+      ctx.res.headers = ctx.res.headers ?? {};
+      ctx.res.headers[String(args[0] ?? '')] = String(args[1] ?? '');
+      return null;
+    }
+    case 'page.htmlEncode': {
+      const s = String(args[0] ?? '');
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    case 'page.generate': {
+      // page.generate(resourceRef) — renders the resource as HTML.
+      // Implemented as page.get + render-on-write via response.write.
+      return await dispatch(ctx, scope, memberIdent('page', 'get'), args, named, loc);
+    }
+    case 'boDesc.getLabel': {
+      const entityName = String(args[0] ?? '');
+      const info = ctx.bos.get(entityName);
+      return (info as any)?.label ?? entityName;
+    }
+    case 'boDesc.getPK': {
+      const entityName = String(args[0] ?? '');
+      const info = ctx.bos.get(entityName);
+      return info?.primaryKey ?? 'id';
+    }
+    case 'bo.attrPersistStatus':
+      // .NET runtime tracks dirty/new state on rows; we don't model that.
+      return 'unchanged';
+    case 'filesystem.tail':
+      return '';   // filesystem access on Vercel is read-only / per-request
+
+    // ─── HTTP-request helpers used by ingest scripts ────────────────
+    case 'httpRequest.responseStatusCode': {
+      const h = args[0] as any;
+      return (h && h.__kind === 'HttpReq') ? (h.status as number) : 0;
+    }
+    case 'httpRequest.dispose': return null;     // no resources to free in fetch()-based impl
+    case 'inContext':           return true;     // simplest workable answer; real impl tracks request lifecycle
+
     default:
       throw new RuntimeError(loc, `unimplemented call: ${key}`);
   }
+}
+
+// Tiny helpers to re-dispatch a builtin alias to its underlying impl.
+function idIdent(name: string): A.Expr {
+  return { kind: 'Ident', name, loc: { file: '', line: 0, col: 0 } };
+}
+function memberIdent(obj: string, member: string): A.Expr {
+  return { kind: 'MemberAcc',
+    object: { kind: 'Ident', name: obj, loc: { file: '', line: 0, col: 0 } },
+    member, loc: { file: '', line: 0, col: 0 } };
 }
 
 async function authenticateSession(ctx: Ctx): Promise<boolean> {
@@ -671,6 +954,10 @@ function pickEntityQualifier(v: Value): Qualifier | null {
 function calleePath(callee: A.Expr): string[] {
   if (callee.kind === 'Ident') return [callee.name];
   if (callee.kind === 'MemberAcc') return [...calleePath(callee.object), callee.member];
+  // `true()` / `false()` / `null()` parse as Calls with literal callees —
+  // CaseMaster idiom for boolean / null constants.
+  if (callee.kind === 'BoolLit') return [callee.value ? 'true' : 'false'];
+  if (callee.kind === 'NullLit') return ['null'];
   throw new Error('unrecognised call target');
 }
 

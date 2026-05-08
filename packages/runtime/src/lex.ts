@@ -14,10 +14,12 @@ export type TokKind =
   | 'LANGAT'        // `<@`
   | 'COMMA' | 'COLON' | 'DOT' | 'SLASH'
   | 'EQ' | 'NEQ' | 'LE' | 'GE' | 'LT' | 'GT'   // syntax not used as ops in .cms; keep for future
-  | 'KW_FUNCTION' | 'KW_END_FUNCTION'
+  | 'KW_FUNCTION' | 'KW_END_FUNCTION' | 'KW_EXIT_FUNCTION'
   | 'KW_RESOURCE' | 'KW_END_RESOURCE'
   | 'KW_IF' | 'KW_ELSE' | 'KW_ELSE_IF' | 'KW_END_IF'
   | 'KW_ITERATE' | 'KW_END_ITERATE'
+  | 'KW_FOR' | 'KW_END_FOR'
+  | 'KW_TRY' | 'KW_CATCH' | 'KW_FINALLY' | 'KW_END_TRY'
   | 'KW_RETURN' | 'KW_RAISE'
   | 'KW_TRUE' | 'KW_FALSE' | 'KW_NULL'
   | 'KW_PROTECTED' | 'KW_INHERITS'
@@ -33,6 +35,7 @@ export interface Tok {
 const KEYWORDS: Record<string, TokKind> = {
   function: 'KW_FUNCTION',
   'end-function': 'KW_END_FUNCTION',
+  'exit-function': 'KW_EXIT_FUNCTION',
   resource: 'KW_RESOURCE',
   'end-resource': 'KW_END_RESOURCE',
   if: 'KW_IF',
@@ -41,6 +44,12 @@ const KEYWORDS: Record<string, TokKind> = {
   'end-if': 'KW_END_IF',
   iterate: 'KW_ITERATE',
   'end-iterate': 'KW_END_ITERATE',
+  for: 'KW_FOR',
+  'end-for': 'KW_END_FOR',
+  try: 'KW_TRY',
+  catch: 'KW_CATCH',
+  finally: 'KW_FINALLY',
+  'end-try': 'KW_END_TRY',
   return: 'KW_RETURN',
   raise: 'KW_RAISE',
   protected: 'KW_PROTECTED',
@@ -56,6 +65,9 @@ export class LexError extends Error {
 export function lex(src: string, file: string): Tok[] {
   const out: Tok[] = [];
   let i = 0, line = 1, col = 1;
+  // Track bracket depth so `//` inside `[//route.function]` (path-ref) is
+  // not mis-tokenised as a line comment.
+  let bracketDepth = 0;
 
   const peek = (off = 0) => src[i + off] ?? '';
   const advance = () => {
@@ -74,9 +86,18 @@ export function lex(src: string, file: string): Tok[] {
     if (ch === ' ' || ch === '\t' || ch === '\r') { advance(); continue; }
     if (ch === '\n') { advance(); push('NEWLINE', '\n', startLine, startCol); continue; }
 
-    // Line comments: `// ...`
-    if (ch === '/' && peek(1) === '/') {
+    // Line comments: `// ...` — but not inside `[…]`, where `//` introduces
+    // a path-ref like `[//route.function]`.
+    if (ch === '/' && peek(1) === '/' && bracketDepth === 0) {
       while (i < src.length && peek() !== '\n') advance();
+      continue;
+    }
+
+    // Block comments: `/* ... */` (may span lines, no nesting)
+    if (ch === '/' && peek(1) === '*') {
+      advance(); advance();
+      while (i < src.length && !(peek() === '*' && peek(1) === '/')) advance();
+      if (peek() === '*' && peek(1) === '/') { advance(); advance(); }
       continue;
     }
 
@@ -100,11 +121,13 @@ export function lex(src: string, file: string): Tok[] {
       continue;
     }
 
-    // Backticked template strings: `... can span lines, `\\`` is literal-backtick if needed`
+    // Backticked template strings: `... can span lines, `\`` escapes a literal backtick.
     if (ch === '`') {
       advance();
       let s = '';
       while (i < src.length && peek() !== '`') {
+        if (peek() === '\\' && peek(1) === '`')  { s += '`';  advance(); advance(); continue; }
+        if (peek() === '\\' && peek(1) === '\\') { s += '\\'; advance(); advance(); continue; }
         s += advance();
       }
       if (peek() !== '`') {
@@ -129,8 +152,8 @@ export function lex(src: string, file: string): Tok[] {
     // Punctuation
     if (ch === '(') { advance(); push('LPAREN', '(', startLine, startCol); continue; }
     if (ch === ')') { advance(); push('RPAREN', ')', startLine, startCol); continue; }
-    if (ch === '[') { advance(); push('LBRACK', '[', startLine, startCol); continue; }
-    if (ch === ']') { advance(); push('RBRACK', ']', startLine, startCol); continue; }
+    if (ch === '[') { advance(); bracketDepth++; push('LBRACK', '[', startLine, startCol); continue; }
+    if (ch === ']') { advance(); if (bracketDepth > 0) bracketDepth--; push('RBRACK', ']', startLine, startCol); continue; }
     if (ch === '<') { advance(); push('LANG',   '<', startLine, startCol); continue; }
     if (ch === '>') { advance(); push('RANG',   '>', startLine, startCol); continue; }
     if (ch === ',') { advance(); push('COMMA',  ',', startLine, startCol); continue; }
@@ -139,26 +162,20 @@ export function lex(src: string, file: string): Tok[] {
     if (ch === '/') { advance(); push('SLASH',  '/', startLine, startCol); continue; }
 
     // Identifiers (incl. dotted: `iterator.ofEntity` is two IDENT + DOT)
-    // and the kebab-case `end-function` family handled below.
-    if (/[A-Za-z_]/.test(ch)) {
+    // Allows hyphens within an identifier (`end-function`, `AR-AE`, `exit-function`)
+    // when the hyphen is followed by another letter — keeps `-NUM` literal numbers
+    // working since those are matched earlier.
+    // Also accepts a leading `$` (i18n shorthand: `$getTranslation('foo')`).
+    if (/[A-Za-z_$]/.test(ch)) {
       let s = advance();
-      while (i < src.length && /[A-Za-z0-9_]/.test(peek())) s += advance();
-      // Lookahead for kebab-form keywords: `end-function`, `else-if`, etc.
-      if (s === 'end' || s === 'else') {
-        if (peek() === '-') {
-          let probe = '-';
-          let look = 1;
-          while (/[A-Za-z]/.test(src[i + look] ?? '')) {
-            probe += src[i + look];
-            look++;
-          }
-          const candidate = s + probe;
-          if (KEYWORDS[candidate]) {
-            for (let k = 0; k < probe.length; k++) advance();
-            push(KEYWORDS[candidate]!, candidate, startLine, startCol);
-            continue;
-          }
-        }
+      while (i < src.length) {
+        const p = peek();
+        if (/[A-Za-z0-9_]/.test(p)) { s += advance(); continue; }
+        // Allow hyphen inside identifier only when followed by a letter and we
+        // already have at least one letter, so subtraction-style `a -b` (with
+        // a space) won't be glued. We still defensively require no space.
+        if (p === '-' && /[A-Za-z]/.test(src[i + 1] ?? '')) { s += advance(); continue; }
+        break;
       }
       const kw = KEYWORDS[s];
       if (kw) { push(kw, s, startLine, startCol); continue; }
