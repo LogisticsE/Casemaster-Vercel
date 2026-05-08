@@ -73,11 +73,12 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
     case 'page/data/table': {
       const it = q.props.iterator ?? null;
       const rows = (it && (it as any).__kind === 'Iter') ? (it as any).rows : [];
+      const tableCls = 'cms-table table table-sm table-striped table-bordered table-hover';
       if (!rows.length) {
-        return `<table class="cms-table"><tbody><tr><td class="empty">no rows</td></tr></tbody></table>`;
+        return `<table class="${tableCls}"><tbody><tr><td class="empty text-muted">no rows</td></tr></tbody></table>`;
       }
       const cols = Object.keys((rows[0] as any).data ?? {});
-      let html = '<table class="cms-table"><thead><tr>';
+      let html = `<table class="${tableCls}"><thead><tr>`;
       for (const c of cols) html += `<th>${esc(c)}</th>`;
       html += '</tr></thead><tbody>';
       for (const r of rows) {

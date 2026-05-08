@@ -277,6 +277,15 @@ async function dispatch(
     case 'div':    return num(args[0]!) / num(args[1]!);
     case 'mod':    return num(args[0]!) % num(args[1]!);
     case 'lng':    return Math.trunc(num(args[0]!));
+    case 'dbl':    {
+      // CaseMaster's parse-double. Throws RuntimeError on garbage so callers
+      // can catch via _onError(dbl(x), 0).
+      const v = args[0];
+      if (typeof v === 'number') return v;
+      const n = parseFloat(String(v ?? ''));
+      if (isNaN(n)) throw new RuntimeError(loc, `dbl: cannot parse '${v}' as a number`);
+      return n;
+    }
 
     case 'if':     return truthy(args[0]!) ? args[1]! : args[2]!;
 
