@@ -82,7 +82,7 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
       html += '</tr></thead><tbody>';
       for (const r of rows) {
         html += '<tr>';
-        for (const c of cols) html += `<td>${esc(String((r as any).data[c] ?? ''))}</td>`;
+        for (const c of cols) html += `<td>${esc(formatCell((r as any).data[c]))}</td>`;
         html += '</tr>';
       }
       html += '</tbody></table>';
@@ -232,6 +232,21 @@ function renderInput(q: Qualifier, type: string): string {
 }
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]!));
+}
+
+// Convert a single row cell value to a presentable string. Postgres returns
+// timestamp/date columns as JS Date objects; default `String(date)` produces
+// `Wed May 06 2026 00:00:00 GMT+0200 (...)` which is unreadable in a table.
+// We render dates as ISO with the time stripped when it's midnight.
+function formatCell(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) {
+    const iso = v.toISOString();              // 2026-05-06T00:00:00.000Z
+    return iso.slice(11, 19) === '00:00:00'
+      ? iso.slice(0, 10)                       // 2026-05-06
+      : iso.slice(0, 19).replace('T', ' ');    // 2026-05-06 14:32:18
+  }
+  return String(v);
 }
 function truthyValue(v: any): boolean {
   if (v === null || v === false || v === 0 || v === '') return false;

@@ -568,6 +568,8 @@ async function dispatch(
       try { return new URL(ref).host === host; } catch { return false; }
     }
     case 'request.url':           return ctx.req.url;
+    case 'request.urlBase':       return '';   // mounted-at-root assumption; override via env if needed
+    case 'request.path':          { try { return new URL(ctx.req.url, 'http://x').pathname; } catch { return ctx.req.url; } }
     case 'qs.getUntrusted':       return ctx.req.query[String(args[0] ?? '')] ?? '';
     case 'qs.isTrusted':          return false; // CSRF: deferred to Phase 7+
 
