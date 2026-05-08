@@ -210,26 +210,31 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
   };
 }
 
-// Default HTML envelope for pages that didn't emit one. Loads Bootstrap 5
-// from a CDN (CaseMaster apps use Bootstrap 5 classes throughout) and
-// renders a thin fixed-top navbar so layouts that assume `body > main`
-// padding (like the WMS sidebar) line up correctly.
+// Default HTML envelope for pages that didn't emit one. Loads the same
+// front-end stack the official CaseMaster runtime ships (jQuery 3 +
+// Bootstrap 4.6 + Font Awesome 6 free) so .cms pages written for the
+// .NET runtime render with the same look. We deliberately stay on
+// Bootstrap 4 — `jumbotron`, `badge-info`, `text-right`, `pull-right`
+// and other BS4 idioms are pervasive in real CaseMaster source and
+// were removed/renamed in BS5, which would silently no-op them.
 function wrapInDefaultShell(body: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <title>cms-vercel</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 </head>
 <body>
   <nav class="navbar navbar-light bg-white border-bottom fixed-top" style="height:56px">
     <div class="container-fluid"><a class="navbar-brand" href="/">cms-vercel</a></div>
   </nav>
   <main style="padding-top:64px">${body}</main>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>`;
 }
