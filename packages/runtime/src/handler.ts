@@ -227,6 +227,11 @@ function wrapInDefaultShell(body: string): string {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    /* Mirror cm.css main width rule from the official runtime so layouts
+       that rely on body > main > .container max-width none fill the viewport. */
+    main { width: 100%; overflow-x: auto; }
+  </style>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 </head>
 <body>
