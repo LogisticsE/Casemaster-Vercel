@@ -116,6 +116,51 @@ describe('Phase 4 — function calls', () => {
   });
 });
 
+describe('response.redirect URL translation', () => {
+  it('translates "page:fn" CaseMaster syntax to /page/<path>/f/<fn>', async () => {
+    const cms = await import('cms-vercel');
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const src = `function entry()
+        response.redirect('wms:main')
+    end-function`;
+    const parsed = cms.parse(cms.lex(src, 'page/index.cms'), 'page/index.cms');
+    for (const fn of parsed.funcs) {
+      reg.funcs.set(`page/index:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      currentPage: 'page/index',
+      req: { method:'GET', url:'/page/index', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    await callFunction(ctx, 'page/index:entry');
+    expect(ctx.res.redirect).toBe('/page/wms/f/main');
+    expect(ctx.res.status).toBe(302);
+  });
+
+  it('passes absolute paths through unchanged', async () => {
+    const cms = await import('cms-vercel');
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const src = `function entry()
+        response.redirect('/login')
+    end-function`;
+    const parsed = cms.parse(cms.lex(src, 'page/x.cms'), 'page/x.cms');
+    for (const fn of parsed.funcs) {
+      reg.funcs.set(`page/x:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      currentPage: 'page/x',
+      req: { method:'GET', url:'/page/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    await callFunction(ctx, 'page/x:entry');
+    expect(ctx.res.redirect).toBe('/login');
+  });
+});
+
 describe('multi-segment page routing', () => {
   it('two pages at different paths can both define main() without colliding', async () => {
     // Simulate the WMS-style tree: app/page/wms/inventory.cms and

@@ -362,7 +362,25 @@ async function dispatch(
     case 'response.end':         return null;
     case 'response.clearContent':{ ctx.res.body = ''; return null; }
     case 'response.redirect': {
-      ctx.res.redirect = String(args[0] ?? '');
+      // CaseMaster supports three redirect target shapes:
+      //   1. Absolute URL or absolute path:  passes through unchanged.
+      //   2. 'page/path:fn' or 'path:fn':    translated to /page/<path>/f/<fn>.
+      //   3. Bare 'fn':                      same page, different function.
+      const target = String(args[0] ?? '');
+      let url: string;
+      if (/^https?:\/\//i.test(target) || target.startsWith('/')) {
+        url = target;
+      } else if (target.includes(':')) {
+        const [p, fn] = target.split(':');
+        const path = (p ?? '').replace(/^page\//, '');
+        url = `/page/${path}/f/${fn ?? ''}`;
+      } else if (ctx.currentPage) {
+        const path = ctx.currentPage.replace(/^page\//, '');
+        url = `/page/${path}/f/${target}`;
+      } else {
+        url = target;
+      }
+      ctx.res.redirect = url;
       ctx.res.status = 302;
       return null;
     }
