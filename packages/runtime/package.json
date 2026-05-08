@@ -27,7 +27,8 @@
   "bin": {
     "cms-vercel-bench":  "./bin/bench.mjs",
     "cms-vercel-import": "./bin/import.mjs",
-    "cms-vercel-build":  "./bin/build.mjs"
+    "cms-vercel-build":  "./bin/build.mjs",
+    "cms-vercel-dev":    "./bin/dev.mjs"
   },
   "files": [
     "dist",

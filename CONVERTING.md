@@ -173,15 +173,26 @@ which makes "is `.env.local` actually loaded?" easy to answer.
 
 ### 5. Walk through the URLs
 
-Start the dev server:
+Start the dev server. Two options:
 
 ```powershell
+# Option A — fast inner loop (recommended for development)
+npx cms-vercel-dev
+
+# Option B — full Vercel CLI dev (slower, but matches production routing layer 1:1)
 npx vercel dev
 ```
 
-First run prompts you to link the Vercel project (pick the one created
-in HOWTOLAUNCH step 4). Then visit each page in your app on
-`http://localhost:3000`:
+`cms-vercel-dev` is a thin Node http server that loads your `api/index.ts`
+directly — no per-request bundling, no proxy hop. Adds ~50ms per request
+warm vs `vercel dev`'s ~2.5s. Applies the rewrites from `vercel.json`
+and serves `/static/*` from `public/`. Loads `.env.local` automatically.
+
+For TypeScript handlers, install `tsx` once: `npm i -D tsx`.
+
+First run of `vercel dev` prompts you to link the Vercel project (pick
+the one created in HOWTOLAUNCH step 4). Then visit each page in your
+app on `http://localhost:3000`:
 
 - **Page renders, data shows** → port complete for this page.
 - **Page is mostly right but missing UI** → look in the HTML source

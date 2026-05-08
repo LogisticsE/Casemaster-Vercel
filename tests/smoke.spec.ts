@@ -235,6 +235,32 @@ describe('response.redirect URL translation', () => {
   });
 });
 
+describe('bo.count parallel pre-fetch', () => {
+  it('reads from a pre-populated cache without hitting the database', async () => {
+    const cms = await import('cms-vercel');
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const src = `function entry()
+        return bo.count('wms/inventory', 'status="OPEN"')
+    end-function`;
+    const parsed = cms.parse(cms.lex(src, 'page/x.cms'), 'page/x.cms');
+    for (const fn of parsed.funcs) {
+      reg.funcs.set(`page/x:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+    // Pre-populated cache simulates the prefetch result; if the runtime
+    // ignores it and tries to hit pg.Pool, the test fails because there's
+    // no DATABASE_URL configured for the test runner.
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      currentPage: 'page/x',
+      req: { method:'GET', url:'/page/x', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+      boCountCache: new Map([['wms/inventory|status="OPEN"', 42]]),
+    };
+    expect(await callFunction(ctx, 'page/x:entry')).toBe(42);
+  });
+});
+
 describe('multi-segment page routing', () => {
   it('two pages at different paths can both define main() without colliding', async () => {
     // Simulate the WMS-style tree: app/page/wms/inventory.cms and

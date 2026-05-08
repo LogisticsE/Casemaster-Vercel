@@ -84,6 +84,11 @@ export interface Ctx {
   // Used to resolve unqualified function references against the file the
   // request landed in, so 152 pages can each have their own `main()`.
   currentPage?: string;
+  // Per-request bo.count cache populated by the pre-fetch pass on
+  // callFunction entry. Keys are `${entity}|${where}` strings.
+  // Sequential .cms statements `set('a', bo.count('x'))` `set('b', bo.count('y'))`
+  // become two parallel queries instead of two sequential round trips.
+  boCountCache?: Map<string, number>;
 }
 
 export class RuntimeError extends Error {
@@ -116,6 +121,18 @@ export async function callFunction(ctx: Ctx, name: string, args: Value[] = []): 
     }
     scope.set(p.name, v);
   }
+
+  // Speedup: pages typically open with many `set('cnt_x', bo.count(...))`
+  // lines. The interpreter is sequential, so 22 dashboard counters become
+  // 22 round trips. We pre-scan the body for bo.count calls with literal
+  // arguments and run them all in parallel up front; the per-call dispatch
+  // then reads from the cache instead of issuing a fresh query.
+  // Skip when entering a function we're already inside (recursive calls
+  // share the cache populated by the outer call).
+  if (!ctx.boCountCache) {
+    await prefetchBoCounts(ctx, fn);
+  }
+
   try {
     await execBlock(ctx, scope, fn.body);
     return null;
@@ -752,12 +769,18 @@ async function dispatch(
     case 'bo.count': {
       const entityName = String(args[0] ?? '');
       const where = args[1] ? String(args[1]) : '';
+      // Cache hit from the parallel pre-fetch pass in callFunction.
+      const cacheKey = `${entityName}|${where}`;
+      const cached = ctx.boCountCache?.get(cacheKey);
+      if (cached !== undefined) return cached;
       const info = ctx.bos.get(entityName);
       const tbl = info?.table ?? entityToTable(ctx, entityName);
       let sql = `SELECT count(*) AS n FROM ${tbl}`;
       if (where) sql += ` WHERE ${compileWhere(where, info)}`;
       const rows = await query(sql);
-      return Number((rows[0] as any)?.n ?? 0);
+      const n = Number((rows[0] as any)?.n ?? 0);
+      ctx.boCountCache?.set(cacheKey, n);
+      return n;
     }
     case 'bo.update':          return await dispatch(ctx, scope, memberIdent('bo', 'persist'), args, named, loc);
     case 'bo.insert':          return await dispatch(ctx, scope, memberIdent('bo', 'persist'), args, named, loc);
@@ -1020,6 +1043,96 @@ function entityToTable(ctx: Ctx, entity: string): string {
   const info = ctx.bos.get(entity);
   if (info) return info.table;
   return entity.replace(/\//g, '_').replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+}
+
+// Walk a function body and harvest every `bo.count(<lit>, <lit>?)` call —
+// then run them all in parallel before the function executes. Lets a
+// dashboard with 22 sequential `set('cnt_x', bo.count(...))` lines hit the
+// database concurrently instead of one round trip at a time.
+//
+// Only static-arg calls are pre-fetched. Anything that depends on a runtime
+// value (`bo.count(myVar)`) goes through the normal sequential path.
+async function prefetchBoCounts(ctx: Ctx, fn: A.Func): Promise<void> {
+  const targets: { entity: string; where: string }[] = [];
+  collectBoCountLiterals(fn.body, targets);
+  if (targets.length < 2) return;   // not worth a round-trip parallelisation
+
+  const cache = new Map<string, number>();
+  ctx.boCountCache = cache;
+
+  // Deduplicate before issuing — same (entity, where) only runs once.
+  const seen = new Set<string>();
+  const unique = targets.filter(t => {
+    const k = `${t.entity}|${t.where}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  await Promise.all(unique.map(async ({ entity, where }) => {
+    const info = ctx.bos.get(entity);
+    const tbl = info?.table ?? entityToTable(ctx, entity);
+    let sql = `SELECT count(*) AS n FROM ${tbl}`;
+    if (where) sql += ` WHERE ${compileWhere(where, info)}`;
+    try {
+      const rows = await query(sql);
+      cache.set(`${entity}|${where}`, Number((rows[0] as any)?.n ?? 0));
+    } catch {
+      // Swallow here — the actual bo.count call site will throw with proper
+      // .cms file:line:col when it can't find the cached entry.
+    }
+  }));
+}
+
+function collectBoCountLiterals(stmts: A.Stmt[], out: { entity: string; where: string }[]) {
+  for (const s of stmts) walkStmt(s, out);
+}
+function walkStmt(s: A.Stmt, out: { entity: string; where: string }[]) {
+  switch (s.kind) {
+    case 'Set':         walkExpr(s.value, out); break;
+    case 'ExprStmt':    walkExpr(s.expr, out); break;
+    case 'Return':      if (s.value) walkExpr(s.value, out); break;
+    case 'Raise':       walkExpr(s.exType, out); walkExpr(s.message, out); break;
+    case 'If':
+      walkExpr(s.cond, out);
+      collectBoCountLiterals(s.then, out);
+      for (const ei of s.elseIfs) { walkExpr(ei.cond, out); collectBoCountLiterals(ei.body, out); }
+      if (s.else_) collectBoCountLiterals(s.else_, out);
+      break;
+    case 'Iterate':
+      walkExpr(s.source, out);
+      collectBoCountLiterals(s.body, out);
+      break;
+    case 'Try':
+      collectBoCountLiterals(s.body, out);
+      if (s.catch_)   collectBoCountLiterals(s.catch_, out);
+      if (s.finally_) collectBoCountLiterals(s.finally_, out);
+      break;
+  }
+}
+function walkExpr(e: A.Expr, out: { entity: string; where: string }[]) {
+  if (e.kind === 'Call') {
+    if (e.callee.kind === 'MemberAcc'
+        && e.callee.object.kind === 'Ident'
+        && e.callee.object.name === 'bo'
+        && e.callee.member === 'count') {
+      const a0 = e.args[0];
+      const a1 = e.args[1];
+      if (a0?.kind === 'StrLit') {
+        const entity = a0.value;
+        const where = a1?.kind === 'StrLit' ? a1.value : '';
+        out.push({ entity, where });
+      }
+    }
+    walkExpr(e.callee, out);
+    for (const a of e.args) walkExpr(a, out);
+  } else if (e.kind === 'MemberAcc') {
+    walkExpr(e.object, out);
+  } else if (e.kind === 'Qualifier') {
+    for (const v of Object.values(e.props)) walkExpr(v, out);
+  } else if (e.kind === 'NamedArg') {
+    walkExpr((e as any).value, out);
+  }
 }
 
 // CaseMaster's `where:` mini-language uses `=` for equality, `&` for AND,
