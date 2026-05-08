@@ -278,11 +278,18 @@ async function dispatch(
     case 'mod':    return num(args[0]!) % num(args[1]!);
     case 'lng':    return Math.trunc(num(args[0]!));
     case 'dbl':    {
-      // CaseMaster's parse-double. Throws RuntimeError on garbage so callers
-      // can catch via _onError(dbl(x), 0).
+      // CaseMaster's parse-double.
+      // Empty string / null / undefined → 0 (matches CaseMaster's default for
+      // blank query-string params; without this every form initial-render
+      // explodes when an unset `qty` parses through dbl()).
+      // Non-empty unparseable strings ("abc", "xx") still throw so the
+      // `_onError(dbl(x), default)` idiom remains useful.
       const v = args[0];
       if (typeof v === 'number') return v;
-      const n = parseFloat(String(v ?? ''));
+      if (v === null || v === undefined) return 0;
+      const s = String(v).trim();
+      if (s === '') return 0;
+      const n = parseFloat(s);
       if (isNaN(n)) throw new RuntimeError(loc, `dbl: cannot parse '${v}' as a number`);
       return n;
     }
@@ -468,6 +475,7 @@ async function dispatch(
     }
     case 'true':  return true;
     case 'false': return false;
+    case 'null':  return null;
 
     // ─── Phase 5: standard library ──────────────────────────────────
     case 'today':       return new Date().toISOString().slice(0, 10);

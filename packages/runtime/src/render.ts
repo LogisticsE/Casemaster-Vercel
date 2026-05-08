@@ -75,10 +75,12 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
       const rows = (it && (it as any).__kind === 'Iter') ? (it as any).rows : [];
       const tableCls = 'cms-table table table-sm table-striped table-bordered table-hover';
       if (!rows.length) {
-        return `<table class="${tableCls}"><tbody><tr><td class="empty text-muted">no rows</td></tr></tbody></table>`;
+        return `<div class="table-responsive"><table class="${tableCls}"><tbody><tr><td class="empty text-muted">no rows</td></tr></tbody></table></div>`;
       }
       const cols = Object.keys((rows[0] as any).data ?? {});
-      let html = `<table class="${tableCls}"><thead><tr>`;
+      // Wrap in .table-responsive so 30-column WMS tables scroll horizontally
+      // instead of overflowing the page container and breaking the layout.
+      let html = `<div class="table-responsive"><table class="${tableCls}"><thead><tr>`;
       for (const c of cols) html += `<th>${esc(c)}</th>`;
       html += '</tr></thead><tbody>';
       for (const r of rows) {
@@ -86,7 +88,7 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
         for (const c of cols) html += `<td>${esc(formatCell((r as any).data[c]))}</td>`;
         html += '</tr>';
       }
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       return html;
     }
 
