@@ -10,7 +10,7 @@ export type { CreateHandlerOptions } from './handler.js';
 export { loadApp } from './loader.js';
 export type { AppRegistry } from './loader.js';
 
-export { callFunction, evalExpr } from './eval.js';
+export { callFunction, evalExpr, compileWhere } from './eval.js';
 export type { Ctx, Value, Scope, Row, Iter, Qualifier } from './eval.js';
 
 export { lex } from './lex.js';

@@ -116,6 +116,29 @@ describe('Phase 4 — function calls', () => {
   });
 });
 
+describe('compileWhere — CaseMaster predicate syntax', () => {
+  it('converts double-quoted string literals to single-quoted SQL', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    expect(compileWhere('status="OPEN"')).toBe("status='OPEN'");
+  });
+  it('translates | to OR and & to AND', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    expect(compileWhere('status="OPEN" | status="DRAFT"'))
+      .toBe("status='OPEN'  OR  status='DRAFT'");
+    expect(compileWhere('task_type="PICK" & (status="OPEN" | status="ASSIGNED")'))
+      .toBe("task_type='PICK'  AND  (status='OPEN'  OR  status='ASSIGNED')");
+  });
+  it('passes numeric comparisons through unchanged', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    expect(compileWhere('is_billed=0')).toBe('is_billed=0');
+    expect(compileWhere('qty>10 & active=1')).toBe('qty>10  AND  active=1');
+  });
+  it('escapes single quotes inside double-quoted values', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    expect(compileWhere(`name="O'Brien"`)).toBe("name='O''Brien'");
+  });
+});
+
 describe('response.redirect URL translation', () => {
   it('translates "page:fn" CaseMaster syntax to /page/<path>/f/<fn>', async () => {
     const cms = await import('cms-vercel');

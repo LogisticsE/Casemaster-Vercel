@@ -975,13 +975,57 @@ function entityToTable(ctx: Ctx, entity: string): string {
 
 // CaseMaster's `where:` mini-language uses `=` for equality, `&` for AND,
 // `>=`, `<=`, etc. Phase 1 supports just enough to translate the strings
-// the ping function would never produce — but the same compiler will
-// power Phase 2+. Values come pre-substituted from .cms (`concat('id=', [id])`).
-function compileWhere(w: string): string {
-  return w
-    .replace(/\s*&\s*/g, ' AND ')
-    // `name="value"` is already valid SQL; pass through.
-    ;
+// CaseMaster predicate syntax → Postgres WHERE clause.
+//
+// CaseMaster's predicate language (used by `bo.count(entity, where)`,
+// `iterator.ofEntity(... where: ...)`, etc.) differs from SQL in three ways:
+//
+//   1. String literals use double quotes:  status="OPEN"   (not 'OPEN')
+//      Postgres reads "OPEN" as a quoted identifier, so we translate to
+//      single-quoted SQL string literals and escape any internal single
+//      quotes by doubling them.
+//   2. Logical OR is `|`, AND is `&`.
+//      We translate to ` OR ` / ` AND `, but only outside string literals.
+//   3. Numeric / identifier comparisons (`is_billed=0`, `qty>10`) are
+//      already valid SQL and pass through unchanged.
+//
+// Anything more complex (functions, BETWEEN, subqueries) the .cms code
+// would write directly in SQL form anyway.
+export function compileWhere(w: string): string {
+  let out = '';
+  let i = 0;
+  while (i < w.length) {
+    const c = w[i]!;
+    if (c === '"') {
+      // Scan to the matching close-quote; collect the literal value.
+      let j = i + 1;
+      let val = '';
+      while (j < w.length && w[j] !== '"') { val += w[j]; j++; }
+      out += "'" + val.replace(/'/g, "''") + "'";
+      i = j + 1;  // skip the closing quote
+    } else if (c === "'") {
+      // A pre-quoted SQL literal — pass through verbatim, including escaped ''.
+      let j = i + 1;
+      out += "'";
+      while (j < w.length) {
+        out += w[j];
+        if (w[j] === "'" && w[j + 1] !== "'") { j++; break; }
+        if (w[j] === "'" && w[j + 1] === "'") { out += "'"; j += 2; continue; }
+        j++;
+      }
+      i = j;
+    } else if (c === '|') {
+      out += ' OR ';
+      i++;
+    } else if (c === '&') {
+      out += ' AND ';
+      i++;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
 }
 
 function pickEntityQualifier(v: Value): Qualifier | null {
