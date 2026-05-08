@@ -73,15 +73,38 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
     case 'page/data/table': {
       const it = q.props.iterator ?? null;
       const rows = (it && (it as any).__kind === 'Iter') ? (it as any).rows : [];
+      const groupName = q.props.group ? String(q.props.group) : '';
+      const entityName = (it && (it as any).entity) ? String((it as any).entity) : '';
+      const bo = entityName ? ctx.bos.get(entityName) : undefined;
+
+      // Pick the columns to render. If the page declares `group: 'list'` (or
+      // any other group the BO defined) we honour that ordering and skip the
+      // 25 other columns. Otherwise we fall back to "every key in the row".
+      let cols: string[] = [];
+      if (bo && groupName && bo.groups.get(groupName)?.length) {
+        cols = bo.groups.get(groupName)!;
+      } else if (rows.length) {
+        cols = Object.keys((rows[0] as any).data ?? {});
+      }
+
+      // Header text: BO attribute labels when available, raw column name otherwise.
+      const labelOf = (col: string): string => {
+        if (bo) {
+          const attr = bo.attributes.get(col);
+          if (attr?.label) return attr.label;
+        }
+        return col;
+      };
+
       const tableCls = 'cms-table table table-sm table-striped table-bordered table-hover';
-      if (!rows.length) {
+      if (!rows.length || !cols.length) {
         return `<div class="table-responsive"><table class="${tableCls}"><tbody><tr><td class="empty text-muted">no rows</td></tr></tbody></table></div>`;
       }
-      const cols = Object.keys((rows[0] as any).data ?? {});
-      // Wrap in .table-responsive so 30-column WMS tables scroll horizontally
-      // instead of overflowing the page container and breaking the layout.
-      let html = `<div class="table-responsive"><table class="${tableCls}"><thead><tr>`;
-      for (const c of cols) html += `<th>${esc(c)}</th>`;
+      // Wrap in .table-responsive so wide tables scroll horizontally instead
+      // of overflowing the page container. <thead> matches the official
+      // CaseMaster runtime's `bg-primary text-light` styling.
+      let html = `<div class="table-responsive"><table class="${tableCls}"><thead class="bg-primary text-light"><tr>`;
+      for (const c of cols) html += `<th scope="col">${esc(labelOf(c))}</th>`;
       html += '</tr></thead><tbody>';
       for (const r of rows) {
         html += '<tr>';

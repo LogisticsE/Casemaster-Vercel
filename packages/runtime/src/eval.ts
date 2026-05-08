@@ -42,6 +42,9 @@ export interface Iter {
   __kind: 'Iter';
   iterName: string;          // the per-row variable name (`<@iterator/entity name:'c' …>`)
   rows: Row[];
+  entity?: string;           // BO key (e.g. 'wms/inventory') — lets the table
+                             // renderer pull labels and attribute groups from
+                             // ctx.bos so `group: 'list'` filters correctly.
 }
 
 export interface Qualifier {
@@ -356,6 +359,7 @@ async function dispatch(
         __kind: 'Iter',
         iterName,
         rows: rows.map(r => ({ __kind: 'Row', data: r as any, entity: entityName })),
+        entity: entityName,
       };
       return out;
     }

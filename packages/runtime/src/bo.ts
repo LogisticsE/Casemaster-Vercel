@@ -17,6 +17,7 @@ import * as A from './ast.js';
 
 export interface BOAttr {
   column: string;
+  label?: string;            // human-readable header for tables/forms
   dataType?: string;
   foreignKey?: string;
 }
@@ -26,8 +27,11 @@ export interface BOInfo {
   table: string;
   primaryKey: string;
   attributes: Map<string, BOAttr>;
-  // Sourced from `attributeGroups: <list: < … >>` — used by Phase 12 list
-  // pages. Phase 3 captures it but doesn't render with it.
+  // attributeGroups: { list: [...], description: [...], search: [...] }.
+  // The page table renderer reads `groups.get('list')` when a page declares
+  // `<@page/data/table group: 'list'>`. listGroup is kept as a back-compat
+  // alias for the 'list' group.
+  groups: Map<string, string[]>;
   listGroup: string[];
 }
 
@@ -54,26 +58,35 @@ export function tryExtractBo(name: string, resource: A.Resource): BOInfo | null 
       const column = readString(aq.props.column) ?? attrName;
       attributes.set(attrName, {
         column,
+        label: readString(aq.props.label),
         dataType: readMember(aq.props.dataType),
         foreignKey: readString(aq.props.foreignKey),
       });
     }
   }
 
-  const listGroup: string[] = [];
+  // Capture every attribute group, not just `list` — pages also bind
+  // `group: 'description'` / `'search'` / etc. The map keys are the group
+  // names; values are the ordered attribute-name lists.
+  const groups = new Map<string, string[]>();
   const grp = q.props.attributeGroups;
   if (grp && grp.kind === 'Qualifier' && grp.path[0] === '_list') {
-    const list = grp.props.list;
-    if (list && list.kind === 'Qualifier' && list.path[0] === '_list') {
-      for (const [k, v] of Object.entries(list.props)) {
+    for (const [groupName, groupExpr] of Object.entries(grp.props)) {
+      if (/^\d+$/.test(groupName)) continue;
+      const gq = unwrapQualifier(groupExpr);
+      if (!gq || gq.path[0] !== '_list') continue;
+      const items: string[] = [];
+      for (const [k, v] of Object.entries(gq.props)) {
         if (!/^\d+$/.test(k)) continue;
         const s = readString(v);
-        if (s) listGroup.push(s);
+        if (s) items.push(s);
       }
+      groups.set(groupName, items);
     }
   }
+  const listGroup = groups.get('list') ?? [];
 
-  return { name, table, primaryKey, attributes, listGroup };
+  return { name, table, primaryKey, attributes, groups, listGroup };
 }
 
 function unwrapQualifier(e: A.Expr | undefined): A.Qualifier | null {

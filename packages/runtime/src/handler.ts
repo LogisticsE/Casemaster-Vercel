@@ -230,8 +230,8 @@ function wrapInDefaultShell(body: string): string {
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 </head>
 <body>
-  <nav class="navbar navbar-light bg-white border-bottom fixed-top" style="height:56px">
-    <div class="container-fluid"><a class="navbar-brand" href="/">cms-vercel</a></div>
+  <nav class="navbar navbar-expand-lg navbar-dark fixed-top bg-primary" style="height:56px" aria-label="Main navigation">
+    <a class="navbar-brand" href="/">cms-vercel</a>
   </nav>
   <main style="padding-top:64px">${body}</main>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
