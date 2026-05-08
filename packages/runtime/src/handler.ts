@@ -116,17 +116,23 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         req, res, url.pathname, mergedQuery, bodyStr0,
       )) return;
 
-      const m = url.pathname.match(/^\/page\/([^/]+)\/f\/([^/]+)$/);
+      // /page/<path>(/f/<fn>)?  — path may be multi-segment (wms/inventory).
+      // If /f/<fn> is omitted, default to `main` (CaseMaster page convention).
+      const m = url.pathname.match(/^\/page\/(.+?)(?:\/f\/([^/]+))?\/?$/);
       if (!m) {
         res.status(404).setHeader('Content-Type', 'text/plain')
            .send(`no route for ${url.pathname}`);
         return;
       }
-      const fnName = m[2]!;
+      const pagePath = m[1]!;
+      const fnName   = m[2] ?? 'main';
       const reg = registry();
-      if (!reg.funcs.has(fnName)) {
+      // Prefer page-scoped key; fall back to bare for legacy single-page apps.
+      const scopedKey = `page/${pagePath}:${fnName}`;
+      const lookupKey = reg.funcs.has(scopedKey) ? scopedKey : fnName;
+      if (!reg.funcs.has(lookupKey)) {
         res.status(404).setHeader('Content-Type', 'text/plain')
-           .send(`function not found: ${fnName} (loaded: ${[...reg.funcs.keys()].join(', ')})`);
+           .send(`function not found: ${fnName} in page/${pagePath}`);
         return;
       }
 
@@ -134,6 +140,7 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         funcs:     reg.funcs,
         resources: reg.resources,
         bos:       reg.bos,
+        currentPage: `page/${pagePath}`,
         req: {
           method: req.method ?? 'GET',
           url: url.toString(),
@@ -144,7 +151,7 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         res: { contentType: 'text/html', body: '', status: 200, headers: {} },
       };
 
-      await callFunction(ctx, fnName, []);
+      await callFunction(ctx, lookupKey, []);
 
       // Phase 18: write the session back if the function called session.set.
       // New sessions get a generated id + Set-Cookie header.

@@ -90,6 +90,16 @@ Re-running the importer is incremental: it overwrites files that exist
 in the source. It does **not** delete files that were renamed away —
 remove obsolete files manually.
 
+If your source contains a `page/index.cms`, the importer additionally:
+
+- deletes the cms-vercel placeholder `app/page/welcome.cms` (you brought
+  your own landing page; the welcome page is no longer wanted).
+- updates `vercel.json` so the `/` URL routes to `/page/index/f/main`
+  instead of the welcome placeholder.
+
+If your `index.cms` exposes an entry function under a different name,
+edit the `/` rule in `vercel.json` accordingly.
+
 ### 3. Validate
 
 ```powershell

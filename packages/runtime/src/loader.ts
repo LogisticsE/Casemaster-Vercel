@@ -34,7 +34,17 @@ export function loadApp(appDir: string): AppRegistry {
     const parsed = parse(tokens, rel);
 
     const fnNames: string[] = [];
+    // Strip the trailing `.cms` so the page-scoped key matches `currentPage`
+    // built from the URL path (URL has no extension).
+    const fileBase = rel.replace(/\.cms$/, '');
     for (const fn of parsed.funcs) {
+      // Page-scoped key — collision-free across the whole tree.
+      // E.g. `page/wms/inventory:main`, `script/wms/_helpers:fmtDate`.
+      funcs.set(`${fileBase}:${fn.name}`, fn);
+      // Bare name — back-compat for legacy single-page apps + tests that
+      // call `callFunction(ctx, 'foo')` without a path. Last write wins
+      // when names collide; that's fine for unique helpers like
+      // `welcome` / `ping`, and the page-scoped lookup wins for collisions.
       funcs.set(fn.name, fn);
       fnNames.push(fn.name);
     }

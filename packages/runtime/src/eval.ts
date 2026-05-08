@@ -77,6 +77,10 @@ export interface Ctx {
   // sessionDirty tells the route handler to write a Set-Cookie + UPSERT cms_session.
   session?: { id: string; payload: Record<string, unknown> };
   sessionDirty?: boolean;
+  // Page namespace for the in-flight request, e.g. "page/wms/inventory".
+  // Used to resolve unqualified function references against the file the
+  // request landed in, so 152 pages can each have their own `main()`.
+  currentPage?: string;
 }
 
 export class RuntimeError extends Error {
@@ -87,8 +91,17 @@ export class RuntimeError extends Error {
 
 // Public entry point: invoke a function by name. Used by the route
 // handler in api/[...route].ts.
+//
+// Resolution order, in priority:
+//   1. Exact key (`name` may already be path-qualified, e.g. "page/foo:bar")
+//   2. Page-scoped (`${ctx.currentPage}:${name}` if currentPage is set and
+//      `name` has no ':')
+//   3. Bare name (legacy single-page apps)
 export async function callFunction(ctx: Ctx, name: string, args: Value[] = []): Promise<Value> {
-  const fn = ctx.funcs.get(name);
+  let fn = ctx.funcs.get(name);
+  if (!fn && ctx.currentPage && !name.includes(':')) {
+    fn = ctx.funcs.get(`${ctx.currentPage}:${name}`);
+  }
   if (!fn) throw new Error(`function not found: ${name}`);
   const scope = new Scope();
   for (let i = 0; i < fn.params.length; i++) {
@@ -385,21 +398,28 @@ async function dispatch(
     }
 
     // ─── Phase 4: function calls ────────────────────────────────────
-    case 'script.call': {
-      // `script.call('./fn', a, b)` or `script.call('script/path:fn', …)`
-      const ref = String(args[0] ?? '');
-      const fnName = ref.includes(':') ? ref.split(':')[1]! : ref.replace(/^\.\//, '');
-      const fn = ctx.funcs.get(fnName);
-      if (!fn) throw new RuntimeError(loc, `script.call: function not found: ${ref}`);
-      return await callFunction(ctx, fnName, args.slice(1));
-    }
+    case 'script.call':
     case 'page.call': {
-      // page.call('./fn', a, b) — same dispatch as script.call for now.
+      // `script.call('./fn', …)` or `script.call('script/path:fn', …)`
+      // Resolution: a fully qualified `path:fn` looks up directly; a
+      // relative './fn' or bare 'fn' is page-scoped against currentPage,
+      // falling back to the bare name for legacy apps.
       const ref = String(args[0] ?? '');
-      const fnName = ref.includes(':') ? ref.split(':')[1]! : ref.replace(/^\.\//, '');
-      const fn = ctx.funcs.get(fnName);
-      if (!fn) throw new RuntimeError(loc, `page.call: function not found: ${ref}`);
-      return await callFunction(ctx, fnName, args.slice(1));
+      let lookup: string;
+      if (ref.includes(':')) {
+        lookup = ref;
+      } else {
+        const stripped = ref.replace(/^\.\//, '');
+        if (ctx.currentPage && ctx.funcs.has(`${ctx.currentPage}:${stripped}`)) {
+          lookup = `${ctx.currentPage}:${stripped}`;
+        } else {
+          lookup = stripped;
+        }
+      }
+      if (!ctx.funcs.has(lookup)) {
+        throw new RuntimeError(loc, `script.call: function not found: ${ref}`);
+      }
+      return await callFunction(ctx, lookup, args.slice(1));
     }
     case 'script.get': {
       // script.get('./main') — used by BO files to look up the resource

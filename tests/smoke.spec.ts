@@ -116,6 +116,42 @@ describe('Phase 4 — function calls', () => {
   });
 });
 
+describe('multi-segment page routing', () => {
+  it('two pages at different paths can both define main() without colliding', async () => {
+    // Simulate the WMS-style tree: app/page/wms/inventory.cms and
+    // app/page/wms/shipment.cms each with a main() that returns its own
+    // marker. Without page-scoped function keys these would clobber.
+    const cms = await import('cms-vercel');
+    const reg = loadApp(join(process.cwd(), 'app'));
+
+    const inv = cms.parse(cms.lex(`function main() return 'inv-main' end-function`, 'page/wms/inventory.cms'), 'page/wms/inventory.cms');
+    for (const fn of inv.funcs) {
+      reg.funcs.set(`page/wms/inventory:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+
+    const ship = cms.parse(cms.lex(`function main() return 'ship-main' end-function`, 'page/wms/shipment.cms'), 'page/wms/shipment.cms');
+    for (const fn of ship.funcs) {
+      reg.funcs.set(`page/wms/shipment:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+
+    // currentPage on the request scopes the unqualified `main` lookup.
+    const inventoryCtx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      currentPage: 'page/wms/inventory',
+      req: { method:'GET', url:'/page/wms/inventory', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    const shipmentCtx: Ctx = {
+      ...inventoryCtx, currentPage: 'page/wms/shipment',
+    };
+
+    expect(await callFunction(inventoryCtx, 'page/wms/inventory:main')).toBe('inv-main');
+    expect(await callFunction(shipmentCtx, 'page/wms/shipment:main')).toBe('ship-main');
+  });
+});
+
 describe('Phase 5 — standard library', () => {
   it('today/format/addDay round-trip', async () => {
     const src = `function entry()

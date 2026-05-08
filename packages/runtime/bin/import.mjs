@@ -8,7 +8,8 @@
 //   node tools/import.mjs --from C:/path/to/casemaster-runtime
 //   node tools/import.mjs --from ../casemaster-runtime --dry-run
 
-import { mkdirSync, readdirSync, statSync, copyFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, copyFileSync, existsSync,
+         unlinkSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 
 const args = Object.fromEntries(
@@ -86,6 +87,36 @@ if (stats.files === 0) {
   console.error('!! Pass --from pointing at the folder that contains those dirs');
   console.error('!! (or its parent — the importer looks one level down).');
   process.exit(2);
+}
+
+// Wire the imported app into the project: when the user brought their own
+// landing page (app/page/index.cms), drop the cms-vercel welcome placeholder
+// and rewrite vercel.json's `/` rule to land on it.
+if (!DRY) {
+  const userIndex   = join(TO, 'page', 'index.cms');
+  const placeholder = join(TO, 'page', 'welcome.cms');
+  const vercelJson  = join(process.cwd(), 'vercel.json');
+
+  if (existsSync(userIndex)) {
+    if (existsSync(placeholder)) {
+      unlinkSync(placeholder);
+      console.log(`removed placeholder: ${relative(process.cwd(), placeholder)}`);
+    }
+    if (existsSync(vercelJson)) {
+      const cfg = JSON.parse(readFileSync(vercelJson, 'utf8'));
+      let changed = false;
+      for (const r of cfg.rewrites ?? []) {
+        if (r.source === '/' && /\/welcome\b/.test(r.destination ?? '')) {
+          r.destination = '/api?_p=/page/index/f/main';
+          changed = true;
+        }
+      }
+      if (changed) {
+        writeFileSync(vercelJson, JSON.stringify(cfg, null, 2) + '\n');
+        console.log('updated vercel.json: / → /page/index/f/main');
+      }
+    }
+  }
 }
 
 console.log('\nnext: `npm run typecheck && npm test` to surface unsupported features.');

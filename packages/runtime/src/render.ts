@@ -171,7 +171,8 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
     }
 
     case 'url': {
-      // <@url address: 'fnName', qs: <id: 1>> — relative URL to /page/foo/f/<fn>
+      // <@url address: 'fnName' [, qs: <…>]> → /page/<currentPage>/f/<fn>
+      // Address may be 'fn' (same page) or 'page/path:fn' (cross-page).
       const addr = q.props.address ? String(q.props.address) : '';
       const qsObj = q.props.qs;
       let qs = '';
@@ -184,7 +185,17 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
         }
         if (params.length) qs = '?' + params.join('&');
       }
-      return `/page/foo/f/${encodeURIComponent(addr)}${qs}`;
+      let pagePath: string;
+      let fnName: string;
+      if (addr.includes(':')) {
+        const [p, f] = addr.split(':');
+        pagePath = (p ?? '').replace(/^page\//, '') || 'foo';
+        fnName = f ?? '';
+      } else {
+        pagePath = ctx.currentPage?.replace(/^page\//, '') ?? 'foo';
+        fnName = addr;
+      }
+      return `/page/${pagePath}/f/${encodeURIComponent(fnName)}${qs}`;
     }
   }
 
