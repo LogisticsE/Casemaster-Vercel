@@ -180,9 +180,21 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
         res.status(302).setHeader('Location', ctx.res.redirect).send('');
         return;
       }
+
+      // If the page emitted a body fragment (no <!doctype>, no <html>) for an
+      // HTML response, wrap it in a default shell with Bootstrap loaded.
+      // Real CaseMaster pages do this through `inherits 'base'` which pulls
+      // in the framework's HTML envelope; our parser treats `inherits` as a
+      // no-op, so an unwrapped page would render as a Times-New-Roman
+      // fragment with all Bootstrap classes inert.
+      let body = ctx.res.body;
+      const isHtml = /text\/html/i.test(ctx.res.contentType);
+      const looksWrapped = /^\s*<!doctype|^\s*<html\b/i.test(body);
+      if (isHtml && !looksWrapped) body = wrapInDefaultShell(body);
+
       res.status(ctx.res.status)
          .setHeader('Content-Type', ctx.res.contentType)
-         .send(ctx.res.body);
+         .send(body);
     } catch (e: any) {
       if (opts.onError) { opts.onError(e, req, res); return; }
       // Log to stderr so the full trace shows up in `vercel dev`'s terminal.
@@ -196,6 +208,30 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
       res.status(500).setHeader('Content-Type', 'text/plain').send(body);
     }
   };
+}
+
+// Default HTML envelope for pages that didn't emit one. Loads Bootstrap 5
+// from a CDN (CaseMaster apps use Bootstrap 5 classes throughout) and
+// renders a thin fixed-top navbar so layouts that assume `body > main`
+// padding (like the WMS sidebar) line up correctly.
+function wrapInDefaultShell(body: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cms-vercel</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <nav class="navbar navbar-light bg-white border-bottom fixed-top" style="height:56px">
+    <div class="container-fluid"><a class="navbar-brand" href="/">cms-vercel</a></div>
+  </nav>
+  <main style="padding-top:64px">${body}</main>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>`;
 }
 
 function resolveAppDir(explicit?: string): string {
