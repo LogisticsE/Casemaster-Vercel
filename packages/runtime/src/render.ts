@@ -44,10 +44,18 @@ async function renderQualifier(ctx: Ctx, scope: Scope, q: Qualifier): Promise<st
       return `<div class="container">${inner}</div>`;
     }
     case 'page/content': {
-      const title = q.props.title  ? await renderValue(ctx, scope, q.props.title)  : '';
-      const intro = q.props.intro  ? await renderValue(ctx, scope, q.props.intro)  : '';
-      const body  = q.props.content ? await renderValue(ctx, scope, q.props.content) : '';
-      return `${title}${intro}${body}`;
+      // CaseMaster's `<@page/content>` is a generic content container —
+      // it accepts arbitrary named slots (sidebar, hero, kpi, workflows,
+      // …) and concatenates them in declaration order. Earlier this only
+      // handled title/intro/content, which silently dropped every other
+      // slot a real-world page declares.
+      let out = '';
+      for (const k of Object.keys(q.props)) {
+        if (/^\d+$/.test(k)) continue;        // skip positional keys
+        if (k === '_value') continue;          // skip parser-internal
+        out += await renderValue(ctx, scope, q.props[k] ?? null);
+      }
+      return out;
     }
     case 'page/title': {
       const label = q.props.label ? await renderValue(ctx, scope, q.props.label) : '';
