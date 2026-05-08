@@ -55,14 +55,27 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
   return async function handler(req: VercelRequest, res: VercelResponse) {
     // ?diag=1 — surface registry / app-dir state without touching DB or interpreter.
     if (req.url && /[?&]diag=1/.test(req.url)) {
+      // List user-supplied env keys (filter out the noisy Vercel/Node defaults
+      // so the user can see whether .env.local was actually loaded).
+      const SYSTEM_PREFIXES = ['VERCEL_', 'NEXT_', 'NODE_', 'NPM_', 'PATH', 'PATHEXT',
+        'HOME', 'USER', 'USERPROFILE', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA',
+        'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'COMPUTERNAME', 'PROCESSOR_', 'OS',
+        'PROGRAMFILES', 'PROGRAMDATA', 'PUBLIC', 'SESSIONNAME', 'PSMODULEPATH',
+        'COMMONPROGRAMFILES', 'PROGRAMW6432', 'ALLUSERSPROFILE', 'HOMEDRIVE',
+        'HOMEPATH', 'SHELL', 'TERM', 'LANG', 'LC_', 'PWD', 'OLDPWD'];
+      const userEnvKeys = Object.keys(process.env)
+        .filter(k => !SYSTEM_PREFIXES.some(p => k.startsWith(p) || k === p.replace(/_$/, '')))
+        .sort();
       res.status(200).setHeader('Content-Type', 'application/json').send(JSON.stringify({
         ok: true,
         cwd: process.cwd(),
         appDir: APP_DIR,
         appDirExists: existsSync(APP_DIR),
         hasDbUrl: Boolean(process.env.DATABASE_URL),
+        dbUrlLength: process.env.DATABASE_URL?.length ?? 0,
+        userEnvKeys,
         registryError: appRegistryError ? String(appRegistryError) : null,
-        loadedFns: appRegistry ? [...appRegistry.funcs.keys()] : null,
+        loadedFns: appRegistry ? [...appRegistry.funcs.keys()].length : null,
       }, null, 2));
       return;
     }
