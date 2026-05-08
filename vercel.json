@@ -9,13 +9,14 @@
     }
   },
   "rewrites": [
+    { "source": "/",                   "destination": "/api?_p=/page/welcome/f/welcome" },
     { "source": "/page/:path*",        "destination": "/api?_p=/page/:path*" },
     { "source": "/maintenance/:path*", "destination": "/api?_p=/maintenance/:path*" },
     { "source": "/static/:path*",      "destination": "/:path*" }
   ],
   "crons": [
     {
-      "path": "/page/foo/f/ping",
+      "path": "/page/ping/f/ping",
       "schedule": "0 6 * * *"
     }
   ]

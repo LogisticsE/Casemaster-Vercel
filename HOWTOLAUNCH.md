@@ -44,14 +44,17 @@ Then:
 npm install
 ```
 
-`npm install` triggers a `postinstall` hook that runs `tsc -p packages/runtime`
-to build the runtime's compiled JS into `packages/runtime/dist/`. If you
-ever skip this build (rare), the `cms-vercel-build` validator will tell
-you what to do.
+`npm install` triggers a `postinstall` hook that:
 
-This gives you a working cms-vercel project. The runtime lives under
-`packages/runtime/`; everything you'll edit lives under `app/`,
-`public/`, and the project's root config files.
+1. Compiles the runtime to `packages/runtime/dist/` (via `tsc`), and
+2. Prints a short banner showing your next step
+   (`bin/welcome.mjs` — adapts based on whether `.env.local` exists yet).
+
+This gives you a working cms-vercel project. The two boundaries to remember:
+
+- **`app/`** — your code. Edit anything here. Read [`app/README.md`](./app/README.md).
+- **`packages/runtime/`** — the framework. Don't edit; `git pull` for
+  updates. Read [`packages/runtime/README.md`](./packages/runtime/README.md).
 
 ## 2. Configure the database
 
@@ -130,13 +133,16 @@ to stop.
 
 The default scaffold serves these routes out of the box:
 
-| URL                          | What                                   |
-|------------------------------|----------------------------------------|
-| `/`                          | Landing page (edit `public/index.html`)|
-| `/page/foo/f/hello`          | Demo page (edit `app/page/hello.cms`)  |
-| `/page/foo/f/ping`           | DB connectivity check                  |
-| `/api?diag=1`                | Registry health, app dir, env vars     |
-| `/api?stats=1`               | Function/resource/BO counts            |
+| URL                          | What                                            |
+|------------------------------|-------------------------------------------------|
+| `/`                          | Welcome page (rendered by `app/page/welcome.cms`)|
+| `/page/welcome/f/welcome`    | Same page — direct route                        |
+| `/page/ping/f/ping`          | DB connectivity check (`app/page/ping.cms`)     |
+| `/api?diag=1`                | Registry health, app dir, env vars              |
+| `/api?stats=1`               | Function/resource/BO counts                     |
+
+Edit `app/page/welcome.cms` to customise the landing page. The runtime
+hot-reloads `.cms` changes on the next request.
 
 If you've imported an existing CaseMaster app, your URLs follow the
 same `/page/<script>/f/<function>` and `/maintenance/<bo>` patterns
@@ -237,22 +243,18 @@ After both:
 
 ## Project layout
 
-| Path                          | Description                                   | You edit it? |
-|-------------------------------|-----------------------------------------------|:------------:|
-| `app/page/*.cms`              | Page handlers (your URLs)                     | ✓            |
-| `app/bo/**/*.cms`             | Business Object declarations (DB tables)      | ✓            |
-| `app/script/**/*.cms`         | Reusable scripts                              | ✓            |
-| `api/index.ts`                | 5-line Vercel-Function entrypoint             | rarely       |
-| `public/`                     | Static assets, served at `/static/*`          | ✓            |
-| `vercel.json`                 | Routing, cron, build configuration            | rarely       |
-| `package.json`                | npm metadata + scripts                        | ✓            |
-| `packages/runtime/`           | The interpreter — leave alone unless upgrading the runtime | × |
-| `private-app/` (if present)   | Project-specific source kept out of the public deploy | ✓ |
+| Path                          | Description                                                | You edit it? |
+|-------------------------------|------------------------------------------------------------|:------------:|
+| `app/`                        | Your `.cms` code (page/, bo/, script/, qualifier/). [README](./app/README.md). | ✓ |
+| `api/index.ts`                | 5-line Vercel-Function entrypoint                          | rarely       |
+| `public/`                     | Static assets, served at `/static/*`                       | ✓            |
+| `vercel.json`                 | Routing, cron, build configuration                         | rarely       |
+| `package.json`                | npm metadata + scripts                                     | ✓            |
+| `packages/runtime/`           | The cms-vercel framework. [README](./packages/runtime/README.md). | × |
 
 The contract is simple: you own `app/`, `public/`, `vercel.json`, and
 `package.json`. Everything under `packages/runtime/` is "the
-framework" — touch it only when you intentionally want to upgrade or
-extend it.
+framework" — `git pull` for upstream updates without touching it.
 
 ## Updating the runtime
 

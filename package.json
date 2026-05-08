@@ -13,7 +13,7 @@
   "scripts": {
     "//local-dev":    "Use `npx vercel dev` directly. We deliberately don't expose `npm run dev` because Vercel CLI v50+ recurses if it finds a `dev` script that runs `vercel dev`.",
     "build":          "npm --workspaces --if-present run build",
-    "postinstall":    "npm --workspaces --if-present run build",
+    "postinstall":    "npm --workspaces --if-present run build && node packages/runtime/bin/welcome.mjs",
     "typecheck":      "tsc --noEmit",
     "test":           "vitest run",
     "deploy":         "vercel --prod",
