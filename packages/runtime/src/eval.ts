@@ -393,7 +393,7 @@ async function dispatch(
       // (typically `set('main', page.get('./fooBody'))`).
       const ref = String(args[0] ?? '');
       const name = ref.startsWith('./') ? ref.slice(2) : ref;
-      const r = ctx.resources.get(name);
+      const r = resolveResource(ctx, name);
       if (!r) throw new RuntimeError(loc, `page.get: resource not found: ${ref}`);
       // Resources see the caller's scope so they can read [main], [tabActive], etc.
       return await evalExpr(ctx, scope, r.body);
@@ -453,7 +453,7 @@ async function dispatch(
       // named `main`. Returns the resource's evaluated body.
       const ref = String(args[0] ?? '');
       const name = ref.startsWith('./') ? ref.slice(2) : ref;
-      const r = ctx.resources.get(name);
+      const r = resolveResource(ctx, name);
       if (!r) return null;
       return await evalExpr(ctx, scope, r.body);
     }
@@ -784,7 +784,7 @@ async function dispatch(
       // For now return the resource's body expression so callers can pass it on.
       const ref = String(args[0] ?? '');
       const name = ref.startsWith('./') ? ref.slice(2) : ref;
-      const r = ctx.resources.get(name);
+      const r = resolveResource(ctx, name);
       if (!r) throw new RuntimeError(loc, `qualifier.get: not found: ${ref}`);
       return await evalExpr(ctx, scope, r.body);
     }
@@ -942,6 +942,19 @@ async function dispatch(
     // .cms caused it instead of just the underlying library frame.
     throw new RuntimeError(loc, `${key}: ${e?.message ?? String(e)}`);
   }
+}
+
+// Resource lookup with the same scoping rule as functions: try the
+// page-scoped key first (`page/wms/inbound:mainView`), fall back to bare.
+// Without this, every WMS page declaring `protected resource mainView`
+// collides into a single global slot and only the last-loaded one wins —
+// the symptom is "every URL renders whichever page was loaded last".
+function resolveResource(ctx: Ctx, name: string): Resource | undefined {
+  if (ctx.currentPage) {
+    const r = ctx.resources.get(`${ctx.currentPage}:${name}`);
+    if (r) return r;
+  }
+  return ctx.resources.get(name);
 }
 
 // Tiny helpers to re-dispatch a builtin alias to its underlying impl.

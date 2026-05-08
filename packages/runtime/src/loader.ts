@@ -50,7 +50,16 @@ export function loadApp(appDir: string): AppRegistry {
     }
     fileFns.set(rel, fnNames);
 
-    for (const r of parsed.resources) resources.set(r.name, r);
+    // Resources, like functions, are page-scoped to avoid collisions —
+    // every WMS page declares a `mainView` resource and they would otherwise
+    // clobber each other into a single global. We register both the
+    // file-qualified key (`page/wms/inbound:mainView`) and the bare name
+    // (last write wins) so the bare lookup keeps working for legacy
+    // single-file apps and the welcome.cms test.
+    for (const r of parsed.resources) {
+      resources.set(`${fileBase}:${r.name}`, r);
+      resources.set(r.name, r);
+    }
 
     // BO files live under `bo/...`; their resource named `main` carries the
     // <@bo …> declaration. Extract it once at load time so iterator queries
