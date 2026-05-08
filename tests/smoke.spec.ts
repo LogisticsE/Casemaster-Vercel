@@ -92,6 +92,34 @@ describe('Phase 3 — BO registry', () => {
   });
 });
 
+describe('script.call / page.call namespace resolution', () => {
+  it('prepends script/ when calling script.call("path:fn") without a prefix', async () => {
+    const cms = await import('cms-vercel');
+    const reg = loadApp(join(process.cwd(), 'app'));
+    const helperSrc = `function sidebar(active) return concat('SIDEBAR:', [active]) end-function`;
+    const helper = cms.parse(cms.lex(helperSrc, 'script/wms/_layout.cms'), 'script/wms/_layout.cms');
+    for (const fn of helper.funcs) {
+      reg.funcs.set(`script/wms/_layout:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+    const callerSrc = `function entry()
+        return script.call('wms/_layout:sidebar', 'dashboard')
+    end-function`;
+    const caller = cms.parse(cms.lex(callerSrc, 'page/wms.cms'), 'page/wms.cms');
+    for (const fn of caller.funcs) {
+      reg.funcs.set(`page/wms:${fn.name}`, fn);
+      reg.funcs.set(fn.name, fn);
+    }
+    const ctx: Ctx = {
+      funcs: reg.funcs, resources: reg.resources, bos: reg.bos,
+      currentPage: 'page/wms',
+      req: { method:'GET', url:'/page/wms', query:{}, body:'' },
+      res: { contentType:'text/plain', body:'', status:200, headers:{} },
+    };
+    expect(await callFunction(ctx, 'page/wms:entry')).toBe('SIDEBAR:dashboard');
+  });
+});
+
 describe('Phase 4 — function calls', () => {
   it('script.call invokes a same-file function and propagates the return value', async () => {
     const src = `function entry()

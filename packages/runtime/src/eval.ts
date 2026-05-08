@@ -419,14 +419,22 @@ async function dispatch(
     // ─── Phase 4: function calls ────────────────────────────────────
     case 'script.call':
     case 'page.call': {
-      // `script.call('./fn', …)` or `script.call('script/path:fn', …)`
-      // Resolution: a fully qualified `path:fn` looks up directly; a
-      // relative './fn' or bare 'fn' is page-scoped against currentPage,
-      // falling back to the bare name for legacy apps.
+      // CaseMaster convention:
+      //   script.call('foo/bar:fn', …)   → loads from app/script/foo/bar.cms
+      //   page.call('foo/bar:fn', …)     → loads from app/page/foo/bar.cms
+      //   script.call('./fn', …)         → same file as caller
+      // Our loader keys functions as `${rel-without-.cms}:${name}`, so
+      // for `app/script/wms/_layout.cms` the key is `script/wms/_layout:fn`.
+      // We add the appropriate prefix here unless the ref already has one.
       const ref = String(args[0] ?? '');
+      const builtinPrefix = key === 'page.call' ? 'page/' : 'script/';
       let lookup: string;
       if (ref.includes(':')) {
-        lookup = ref;
+        if (ref.startsWith('script/') || ref.startsWith('page/') || ref.startsWith('bo/')) {
+          lookup = ref;
+        } else {
+          lookup = builtinPrefix + ref;
+        }
       } else {
         const stripped = ref.replace(/^\.\//, '');
         if (ctx.currentPage && ctx.funcs.has(`${ctx.currentPage}:${stripped}`)) {
@@ -436,7 +444,7 @@ async function dispatch(
         }
       }
       if (!ctx.funcs.has(lookup)) {
-        throw new RuntimeError(loc, `script.call: function not found: ${ref}`);
+        throw new RuntimeError(loc, `${key}: function not found: ${ref}`);
       }
       return await callFunction(ctx, lookup, args.slice(1));
     }
