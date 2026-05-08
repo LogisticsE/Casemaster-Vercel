@@ -329,7 +329,7 @@ async function dispatch(
 
       const tbl = entityToTable(ctx, entityName);
       let sql = `SELECT * FROM ${tbl}`;
-      if (whereClause) sql += ` WHERE ${compileWhere(whereClause)}`;
+      if (whereClause) sql += ` WHERE ${compileWhere(whereClause, ctx.bos.get(entityName))}`;
       if (orderByCol) {
         const desc = orderByCol.startsWith('-');
         sql += ` ORDER BY ${desc ? orderByCol.slice(1) : orderByCol} ${desc ? 'DESC' : 'ASC'}`;
@@ -719,7 +719,7 @@ async function dispatch(
       const info = ctx.bos.get(entityName);
       const tbl = info?.table ?? entityToTable(ctx, entityName);
       let sql = `SELECT count(*) AS n FROM ${tbl}`;
-      if (where) sql += ` WHERE ${compileWhere(where)}`;
+      if (where) sql += ` WHERE ${compileWhere(where, info)}`;
       const rows = await query(sql);
       return Number((rows[0] as any)?.n ?? 0);
     }
@@ -978,7 +978,7 @@ function entityToTable(ctx: Ctx, entity: string): string {
 // CaseMaster predicate syntax → Postgres WHERE clause.
 //
 // CaseMaster's predicate language (used by `bo.count(entity, where)`,
-// `iterator.ofEntity(... where: ...)`, etc.) differs from SQL in three ways:
+// `iterator.ofEntity(... where: ...)`, etc.) differs from SQL in four ways:
 //
 //   1. String literals use double quotes:  status="OPEN"   (not 'OPEN')
 //      Postgres reads "OPEN" as a quoted identifier, so we translate to
@@ -986,12 +986,25 @@ function entityToTable(ctx: Ctx, entity: string): string {
 //      quotes by doubling them.
 //   2. Logical OR is `|`, AND is `&`.
 //      We translate to ` OR ` / ` AND `, but only outside string literals.
-//   3. Numeric / identifier comparisons (`is_billed=0`, `qty>10`) are
-//      already valid SQL and pass through unchanged.
+//   3. Numeric / identifier comparisons (`qty>10`) pass through unchanged.
+//   4. Booleans are written as `is_x=0` / `is_x=1`. Postgres rejects
+//      `boolean = integer`, so we coerce to `is_x=FALSE` / `=TRUE` when
+//      the schema (BOInfo) tells us the attribute is `dataType.Boolean`.
 //
 // Anything more complex (functions, BETWEEN, subqueries) the .cms code
 // would write directly in SQL form anyway.
-export function compileWhere(w: string): string {
+export function compileWhere(w: string, info?: BOInfo): string {
+  // Boolean coercion pass — runs first so the result feeds into the main
+  // translator below as a normal `attr=FALSE` / `attr=TRUE` literal.
+  if (info) {
+    w = w.replace(/\b(\w+)\s*=\s*([01])\b/g, (m, attr, num) => {
+      const a = info.attributes.get(attr);
+      if (a?.dataType === 'dataType.Boolean') {
+        return `${attr}=${num === '0' ? 'FALSE' : 'TRUE'}`;
+      }
+      return m;
+    });
+  }
   let out = '';
   let i = 0;
   while (i < w.length) {

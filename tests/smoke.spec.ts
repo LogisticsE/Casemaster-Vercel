@@ -137,6 +137,21 @@ describe('compileWhere — CaseMaster predicate syntax', () => {
     const { compileWhere } = await import('cms-vercel');
     expect(compileWhere(`name="O'Brien"`)).toBe("name='O''Brien'");
   });
+  it('coerces is_x=0/=1 to FALSE/TRUE when BO declares dataType.Boolean', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    const info = {
+      name: 'demo', table: 'demo', primaryKey: 'id',
+      attributes: new Map([
+        ['is_billed', { column: 'is_billed', dataType: 'dataType.Boolean' }],
+        ['qty',       { column: 'qty',       dataType: 'dataType.Long'    }],
+      ]),
+      listGroup: [],
+    };
+    expect(compileWhere('is_billed=0', info)).toBe('is_billed=FALSE');
+    expect(compileWhere('is_billed=1', info)).toBe('is_billed=TRUE');
+    // qty=0 must NOT be coerced — qty is an integer column.
+    expect(compileWhere('qty=0', info)).toBe('qty=0');
+  });
 });
 
 describe('response.redirect URL translation', () => {
