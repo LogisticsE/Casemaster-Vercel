@@ -30,23 +30,64 @@ if (!FROM) {
 // state and gets skipped.
 const KEEP_TOP = new Set(['bo', 'page', 'script', 'qualifier']);
 
+// Resolve the actual runtime root. Users typically point --from at their
+// project folder (e.g. C:\Casemaster-WMS), but the bo/page/script/qualifier
+// dirs may live one level down (e.g. C:\Casemaster-WMS\casemaster-runtime).
+// Try the path as-is first; if that has no KEEP_TOP children, look one
+// level down and pick the first child that does.
+function hasKeepChild(dir) {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return false;
+  for (const entry of readdirSync(dir)) {
+    if (KEEP_TOP.has(entry) && statSync(join(dir, entry)).isDirectory()) return true;
+  }
+  return false;
+}
+
+let root = FROM;
+if (!hasKeepChild(FROM)) {
+  const candidates = [];
+  for (const entry of readdirSync(FROM)) {
+    const sub = join(FROM, entry);
+    if (statSync(sub).isDirectory() && hasKeepChild(sub)) candidates.push(sub);
+  }
+  if (candidates.length === 1) {
+    root = candidates[0];
+    console.log(`auto-detected runtime root: ${root}\n`);
+  } else if (candidates.length > 1) {
+    console.error(`Multiple candidate runtime roots under ${FROM}:`);
+    for (const c of candidates) console.error(`  ${c}`);
+    console.error('\nPass --from with one of the paths above.');
+    process.exit(1);
+  }
+}
+
 const stats = { files: 0, dirs: 0, skipped: 0, bytes: 0 };
 
-for (const entry of readdirSync(FROM)) {
+for (const entry of readdirSync(root)) {
   if (!KEEP_TOP.has(entry)) { stats.skipped++; continue; }
-  const src = join(FROM, entry);
+  const src = join(root, entry);
   if (!statSync(src).isDirectory()) { stats.skipped++; continue; }
   walkAndCopy(src, join(TO, entry));
 }
 
 console.log('--- import summary ---');
-console.log(`from:    ${FROM}`);
+console.log(`from:    ${root}`);
 console.log(`to:      ${TO}`);
 console.log(`dirs:    ${stats.dirs}`);
 console.log(`files:   ${stats.files}`);
 console.log(`bytes:   ${stats.bytes.toLocaleString()}`);
 console.log(`skipped: ${stats.skipped} (top-level non-cms dirs)`);
 if (DRY) console.log('(dry run — no files written)');
+
+if (stats.files === 0) {
+  console.error('\n!! No .cms files imported.');
+  console.error(`!! Looked under: ${root}`);
+  console.error('!! Expected at least one of: bo/, page/, script/, qualifier/');
+  console.error('!! Pass --from pointing at the folder that contains those dirs');
+  console.error('!! (or its parent — the importer looks one level down).');
+  process.exit(2);
+}
+
 console.log('\nnext: `npm run typecheck && npm test` to surface unsupported features.');
 
 function walkAndCopy(src, dst) {

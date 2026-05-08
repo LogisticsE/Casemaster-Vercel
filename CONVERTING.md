@@ -58,21 +58,33 @@ the import tool will populate `app/` from your existing runtime.
 
 ### 2. Import your CaseMaster source
 
+Point `--from` at your existing CaseMaster project folder. The importer
+copies the four conventional source dirs (`bo/`, `page/`, `script/`,
+`qualifier/`) into your `app/`, and skips the rest (`runtime/` framework
+files, `.exe` binaries, log files, SQLite DBs).
+
 ```powershell
 cd C:\path\to\my-cms-app
-node packages/runtime/bin/import.mjs --from C:\path\to\casemaster-runtime --dry-run
+node packages/runtime/bin/import.mjs --from C:\path\to\your-casemaster-project --dry-run
 ```
 
-The dry-run prints what would be copied. Inspect the list — the tool
-copies `bo/`, `page/`, `script/`, and `qualifier/` from the runtime
-tree into your `app/`. It deliberately skips `runtime/` itself (the
-framework files), `.exe` binaries, log files, and SQLite DBs.
+You can point `--from` at either:
 
-When the list looks right, drop `--dry-run`:
+- The folder that **directly contains** `bo/`, `page/`, `script/`,
+  `qualifier/` (e.g. `C:\Casemaster-WMS\casemaster-runtime`), **or**
+- A parent of that folder (e.g. `C:\Casemaster-WMS`) — the importer
+  looks one level down to find the runtime root.
+
+The dry-run prints what would be copied. When the list looks right,
+drop `--dry-run`:
 
 ```powershell
-node packages/runtime/bin/import.mjs --from C:\path\to\casemaster-runtime
+node packages/runtime/bin/import.mjs --from C:\path\to\your-casemaster-project
 ```
+
+If you see `!! No .cms files imported.` the path you passed has no
+runtime tree under it — pass a path that contains (or whose immediate
+child contains) `bo/`/`page/`/`script/`/`qualifier/`.
 
 Re-running the importer is incremental: it overwrites files that exist
 in the source. It does **not** delete files that were renamed away —
@@ -130,7 +142,15 @@ non-Postgres adapter and won't.
 
 ### 5. Walk through the URLs
 
-Visit each page in your app on `http://localhost:3000`:
+Start the dev server:
+
+```powershell
+npx vercel dev
+```
+
+First run prompts you to link the Vercel project (pick the one created
+in HOWTOLAUNCH step 4). Then visit each page in your app on
+`http://localhost:3000`:
 
 - **Page renders, data shows** → port complete for this page.
 - **Page is mostly right but missing UI** → look in the HTML source
