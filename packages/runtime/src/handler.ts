@@ -185,8 +185,15 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
          .send(ctx.res.body);
     } catch (e: any) {
       if (opts.onError) { opts.onError(e, req, res); return; }
-      res.status(500).setHeader('Content-Type', 'text/plain')
-         .send(`Error: ${e?.message ?? String(e)}`);
+      // Log to stderr so the full trace shows up in `vercel dev`'s terminal.
+      console.error('[cms-vercel] request failed:', e);
+      // Ship the trace back to the browser too — far more useful than a
+      // bare `Error: <message>` when debugging .cms code locally.
+      const isDev = process.env.NODE_ENV !== 'production';
+      const body = isDev
+        ? `Error: ${e?.message ?? String(e)}\n\n${e?.stack ?? ''}`
+        : `Error: ${e?.message ?? String(e)}`;
+      res.status(500).setHeader('Content-Type', 'text/plain').send(body);
     }
   };
 }
