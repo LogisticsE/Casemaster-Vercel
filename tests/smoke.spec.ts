@@ -130,8 +130,8 @@ describe('compileWhere — CaseMaster predicate syntax', () => {
   });
   it('passes numeric comparisons through unchanged', async () => {
     const { compileWhere } = await import('cms-vercel');
-    expect(compileWhere('is_billed=0')).toBe('is_billed=0');
-    expect(compileWhere('qty>10 & active=1')).toBe('qty>10  AND  active=1');
+    expect(compileWhere('qty>10')).toBe('qty>10');
+    expect(compileWhere('qty>10 & active=2')).toBe('qty>10  AND  active=2');
   });
   it('escapes single quotes inside double-quoted values', async () => {
     const { compileWhere } = await import('cms-vercel');
@@ -151,6 +151,14 @@ describe('compileWhere — CaseMaster predicate syntax', () => {
     expect(compileWhere('is_billed=1', info)).toBe('is_billed=TRUE');
     // qty=0 must NOT be coerced — qty is an integer column.
     expect(compileWhere('qty=0', info)).toBe('qty=0');
+  });
+  it('falls back to is_/has_/can_ name heuristic when no schema is given', async () => {
+    const { compileWhere } = await import('cms-vercel');
+    expect(compileWhere('is_billed=0')).toBe('is_billed=FALSE');
+    expect(compileWhere('has_serial=1')).toBe('has_serial=TRUE');
+    expect(compileWhere('can_pick=0')).toBe('can_pick=FALSE');
+    // A column without the boolean prefix stays integer.
+    expect(compileWhere('qty=0')).toBe('qty=0');
   });
 });
 

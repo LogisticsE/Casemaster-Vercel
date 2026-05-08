@@ -996,15 +996,22 @@ function entityToTable(ctx: Ctx, entity: string): string {
 export function compileWhere(w: string, info?: BOInfo): string {
   // Boolean coercion pass — runs first so the result feeds into the main
   // translator below as a normal `attr=FALSE` / `attr=TRUE` literal.
-  if (info) {
-    w = w.replace(/\b(\w+)\s*=\s*([01])\b/g, (m, attr, num) => {
-      const a = info.attributes.get(attr);
-      if (a?.dataType === 'dataType.Boolean') {
-        return `${attr}=${num === '0' ? 'FALSE' : 'TRUE'}`;
-      }
-      return m;
-    });
-  }
+  //
+  // Schema-aware when BOInfo is available; otherwise falls back to the
+  // CaseMaster naming convention (is_*, has_*, can_*, was_*, should_*).
+  // The fallback matters: if a BO file fails to parse, or its dataType
+  // is declared in some unusual way, the heuristic still catches the
+  // common case so the user isn't blocked.
+  w = w.replace(/\b(\w+)\s*=\s*([01])\b/g, (m, attr, num) => {
+    const a = info?.attributes.get(attr);
+    const explicitlyBool    = a?.dataType === 'dataType.Boolean';
+    const explicitlyNotBool = a?.dataType && a.dataType !== 'dataType.Boolean';
+    const looksBool         = /^(is|has|can|was|should)_/.test(attr);
+    if (explicitlyBool || (!explicitlyNotBool && looksBool)) {
+      return `${attr}=${num === '0' ? 'FALSE' : 'TRUE'}`;
+    }
+    return m;
+  });
   let out = '';
   let i = 0;
   while (i < w.length) {
