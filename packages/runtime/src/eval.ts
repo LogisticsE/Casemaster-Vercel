@@ -594,13 +594,18 @@ async function dispatch(
     case 'sql.execute': {
       // sql.execute('INSERT … VALUES (…)') — write-only SQL. The .cms app
       // is responsible for escaping; we don't do interpolation here.
-      await query(String(args[0] ?? ''));
+      const sql = String(args[0] ?? '');
+      try { await query(sql); }
+      catch (e: any) { throw new RuntimeError(loc, `sql.execute: ${e?.message ?? e}\n  SQL: ${sql}`); }
       return null;
     }
     case 'sql.fetch': {
       // sql.fetch('SELECT id, name FROM x') — returns an Iter walkable
       // by `iterate`. Rows are plain objects, identical shape to bo.attr.
-      const rows = await query(String(args[0] ?? ''));
+      const sql = String(args[0] ?? '');
+      let rows: unknown[];
+      try { rows = await query(sql); }
+      catch (e: any) { throw new RuntimeError(loc, `sql.fetch: ${e?.message ?? e}\n  SQL: ${sql}`); }
       const out: Iter = {
         __kind: 'Iter', iterName: 'r',
         rows: rows.map(r => ({ __kind: 'Row', data: r as any })),
