@@ -16,11 +16,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { query } from './db.js';
 import { BOInfo } from './bo.js';
+import { buildPrismTags, UiOption } from './handler.js';
 
 const PAGE_SIZE = 50;
 
 export interface MaintenanceContext {
   bos: Map<string, BOInfo>;
+  /** Optional prism integration, passed through from createHandler({ ui, uiVersion, uiBase }). */
+  ui?: UiOption;
+  uiVersion?: string;
+  uiBase?: string;
 }
 
 /**
@@ -56,20 +61,20 @@ export async function handleMaintenance(
 
   switch (action) {
     case 'list': {
-      const html = await renderList(info, params);
+      const html = await renderList(info, params, ctx.ui, ctx.uiVersion, ctx.uiBase);
       writeHtml(res, html);
       return true;
     }
     case 'edit': {
       const id = params.id ?? '';
       if (!id) { res.status(400).send('edit: ?id= required'); return true; }
-      const html = await renderEdit(info, id);
+      const html = await renderEdit(info, id, ctx.ui, ctx.uiVersion, ctx.uiBase);
       writeHtml(res, html);
       return true;
     }
     case 'new': {
       const html = renderForm(info, null, /*isNew*/ true);
-      writeHtml(res, renderShell(info, 'New ' + info.name, html));
+      writeHtml(res, renderShell(info, 'New ' + info.name, html, ctx.ui, ctx.uiVersion, ctx.uiBase));
       return true;
     }
     case 'save': {
@@ -112,7 +117,7 @@ export async function handleMaintenance(
   }
 }
 
-async function renderList(info: BOInfo, params: Record<string, string>): Promise<string> {
+async function renderList(info: BOInfo, params: Record<string, string>, ui?: UiOption, uiVersion?: string, uiBase?: string): Promise<string> {
   const page = Math.max(1, parseInt(params.page ?? '1', 10));
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -159,18 +164,18 @@ async function renderList(info: BOInfo, params: Record<string, string>): Promise
     html += '</div>';
   }
 
-  return renderShell(info, info.name, html);
+  return renderShell(info, info.name, html, ui, uiVersion, uiBase);
 }
 
-async function renderEdit(info: BOInfo, id: string): Promise<string> {
+async function renderEdit(info: BOInfo, id: string, ui?: UiOption, uiVersion?: string, uiBase?: string): Promise<string> {
   const rows = await query(
     `SELECT * FROM ${info.table} WHERE ${info.primaryKey} = $1`,
     [id]
   );
   const row = rows[0];
-  if (!row) return renderShell(info, 'Not found', '<p>row not found</p>');
+  if (!row) return renderShell(info, 'Not found', '<p>row not found</p>', ui, uiVersion, uiBase);
   const html = renderForm(info, row as Record<string, unknown>, /*isNew*/ false);
-  return renderShell(info, `Edit ${info.name}#${id}`, html);
+  return renderShell(info, `Edit ${info.name}#${id}`, html, ui, uiVersion, uiBase);
 }
 
 function renderForm(info: BOInfo, row: Record<string, unknown> | null, isNew: boolean): string {
@@ -217,11 +222,12 @@ function coerce(v: string | null): unknown {
   return v;
 }
 
-function renderShell(_info: BOInfo, title: string, body: string): string {
+function renderShell(_info: BOInfo, title: string, body: string, ui?: UiOption, uiVersion?: string, uiBase?: string): string {
+  const prism = buildPrismTags(ui, uiVersion, uiBase);
   return `<!doctype html><html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · cms-vercel</title>
-<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/app.css">${prism.head}
 <style>
   body { font-family: system-ui; padding: 1rem 2rem; }
   .cms-table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
@@ -236,7 +242,7 @@ function renderShell(_info: BOInfo, title: string, body: string): string {
   .cms-control input, .cms-control textarea, .cms-control select { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 13px; }
   .cms-pagination { margin-top: 1rem; color: #475569; font-size: 12px; }
 </style></head>
-<body><h1>${esc(title)}</h1>${body}</body></html>`;
+<body><h1>${esc(title)}</h1>${body}${prism.body}</body></html>`;
 }
 
 function esc(s: string): string {

@@ -18,6 +18,8 @@ import { callFunction, Ctx } from './eval.js';
 import { newSessionId, persistSession, buildCookie } from './session.js';
 import { handleMaintenance } from './maintenance.js';
 
+export type UiOption = 'pro' | 'theme-only' | 'enhancers-only';
+
 export interface CreateHandlerOptions {
   /** Absolute or process.cwd()-relative path to the .cms application. */
   appDir?: string;
@@ -32,6 +34,24 @@ export interface CreateHandlerOptions {
    * message — matches what we ship today.
    */
   onError?: (err: unknown, req: VercelRequest, res: VercelResponse) => void;
+  /**
+   * Opt in to the `casemaster-prism` design system / progressive
+   * enhancement bundle. Injects the prism `<link>` and/or `<script>`
+   * tags into the default shell and the maintenance shell.
+   *   - `'pro'`            → CSS theme + JS enhancers
+   *   - `'theme-only'`     → CSS only
+   *   - `'enhancers-only'` → JS only
+   * See https://github.com/LadFoxTom/casemaster-prism.
+   */
+  ui?: UiOption;
+  /** Optional version pin for the prism CDN URL. Default `'1'` (latest 1.x). */
+  uiVersion?: string;
+  /**
+   * Override the base URL the prism `<link>` and `<script>` tags point at.
+   * Use to vendor prism locally (e.g. `'/static/lib/prism'`). When set,
+   * `uiVersion` is ignored. When unset, the runtime uses the jsDelivr CDN.
+   */
+  uiBase?: string;
 }
 
 export function createHandler(opts: CreateHandlerOptions = {}) {
@@ -125,7 +145,7 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
       // Phase 20: auto BO maintenance pages. Returns true if the
       // request was handled.
       if (await handleMaintenance(
-        { bos: registry().bos },
+        { bos: registry().bos, ui: opts.ui, uiVersion: opts.uiVersion, uiBase: opts.uiBase },
         req, res, url.pathname, mergedQuery, bodyStr0,
       )) return;
 
@@ -190,7 +210,7 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
       let body = ctx.res.body;
       const isHtml = /text\/html/i.test(ctx.res.contentType);
       const looksWrapped = /^\s*<!doctype|^\s*<html\b/i.test(body);
-      if (isHtml && !looksWrapped) body = wrapInDefaultShell(body);
+      if (isHtml && !looksWrapped) body = wrapInDefaultShell(body, opts.ui, opts.uiVersion, opts.uiBase);
 
       res.status(ctx.res.status)
          .setHeader('Content-Type', ctx.res.contentType)
@@ -217,7 +237,8 @@ export function createHandler(opts: CreateHandlerOptions = {}) {
 // Bootstrap 4 — `jumbotron`, `badge-info`, `text-right`, `pull-right`
 // and other BS4 idioms are pervasive in real CaseMaster source and
 // were removed/renamed in BS5, which would silently no-op them.
-function wrapInDefaultShell(body: string): string {
+function wrapInDefaultShell(body: string, ui?: UiOption, uiVersion?: string, uiBase?: string): string {
+  const prism = buildPrismTags(ui, uiVersion, uiBase);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -226,7 +247,7 @@ function wrapInDefaultShell(body: string): string {
   <title>cms-vercel</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/app.css">${prism.head}
   <style>
     /* Mirror cm.css main width rule from the official runtime so layouts
        that rely on body > main > .container max-width none fill the viewport. */
@@ -239,9 +260,26 @@ function wrapInDefaultShell(body: string): string {
     <a class="navbar-brand" href="/">cms-vercel</a>
   </nav>
   <main style="padding-top:64px">${body}</main>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>${prism.body}
 </body>
 </html>`;
+}
+
+/**
+ * Build the prism `<link>` (head) and `<script>` (end-of-body) tags for the
+ * requested `ui` option. Returns empty strings when prism is disabled.
+ * Public so the maintenance shell can reuse the same logic.
+ */
+export function buildPrismTags(ui?: UiOption, uiVersion?: string, uiBase?: string): { head: string; body: string } {
+  if (!ui) return { head: '', body: '' };
+  const base = uiBase
+    ? uiBase.replace(/\/$/, '')
+    : `https://cdn.jsdelivr.net/npm/casemaster-prism@${uiVersion ?? '1'}/dist`;
+  const wantsCss = ui === 'pro' || ui === 'theme-only';
+  const wantsJs  = ui === 'pro' || ui === 'enhancers-only';
+  const head = wantsCss ? `\n  <link rel="stylesheet" href="${base}/prism.min.css">` : '';
+  const body = wantsJs  ? `\n  <script type="module" src="${base}/prism.js"></script>` : '';
+  return { head, body };
 }
 
 function resolveAppDir(explicit?: string): string {
