@@ -89,7 +89,7 @@ function applyRewrite(url) {
     const re = new RegExp(
       '^' +
       r.source
-        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')              // escape regex chars
+        .replace(/[.+?^${}()|[\]\\*]/g, '\\$&')             // escape regex chars (incl. *)
         .replace(/:([a-zA-Z_]+)\\\*/g, '(?<$1>.*)')         // :path*  → catch-all
         .replace(/:([a-zA-Z_]+)/g, '(?<$1>[^/]+)') +        // :slug   → segment
       '$'
