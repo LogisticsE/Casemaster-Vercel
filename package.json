@@ -20,9 +20,34 @@
     "deploy":         "vercel --prod",
     "deploy:preview": "vercel"
   },
+  "main":   "./packages/runtime/dist/index.js",
+  "types":  "./packages/runtime/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types":  "./packages/runtime/dist/index.d.ts",
+      "import": "./packages/runtime/dist/index.js"
+    }
+  },
+  "bin": {
+    "cms-vercel-bench":  "./packages/runtime/bin/bench.mjs",
+    "cms-vercel-import": "./packages/runtime/bin/import.mjs",
+    "cms-vercel-build":  "./packages/runtime/bin/build.mjs",
+    "cms-vercel-dev":    "./packages/runtime/bin/dev.mjs"
+  },
+  "files": [
+    "packages/runtime/dist",
+    "packages/runtime/bin",
+    "packages/runtime/src",
+    "packages/runtime/package.json",
+    "packages/runtime/README.md",
+    "packages/runtime/API.md",
+    "packages/runtime/MIGRATION.md",
+    "README.md"
+  ],
   "dependencies": {
     "cms-vercel": "*",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "tsx": "^4.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
